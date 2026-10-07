@@ -84,7 +84,11 @@ def parse_page(page, page_no: int, block_width: float | None = None) -> list[Tok
             name = norm("".join(w["text"] for w in rest if not _NUM.match(w["text"])))
             seg_label.extend(label)
             if name == "計" or name.startswith("全国計"):
+                pref_label = "".join(seg_label)
                 flush()
+                if nums:   # 都道府県の都市計(「計」行)と全国計も記録する(全体系列に使う)
+                    out.append(TokkoRecord("全国" if name.startswith("全国計") else pref_label,
+                                           "全国計" if name.startswith("全国計") else "計", nums, page_no))
                 seg_label, seg_rows = [], []
                 continue
             if name and nums:
@@ -132,7 +136,7 @@ def select_pref(records: list[TokkoRecord], pref_label: str, stems: dict[str, st
     found: dict[str, TokkoRecord] = {}
     warnings: list[str] = []
     for r in records:
-        if r.pref != pref_label:
+        if r.pref != pref_label or r.city_stem in ("計", "全国計"):    # 計の行は全体系列(baseline)で使う
             continue
         code = stems.get(r.city_stem)
         if code is None:
@@ -142,3 +146,45 @@ def select_pref(records: list[TokkoRecord], pref_label: str, stems: dict[str, st
             warnings.append(f"重複 {r.city_stem}")
         found[code] = r
     return found, warnings
+
+
+def parse_pref_totals_dec(path) -> dict:
+    """12 月分 PDF の都道府県別表(市町村分 合計)。戻り値: {都道府県の短縮名 or '全国': 市町村分合計(千円)}"""
+    import re as _re
+    out = {}
+    with pdfplumber.open(path) as pdf:
+        for p in pdf.pages[:3]:
+            t = p.extract_text() or ""
+            if "道府県分" not in norm(t) or "町村" not in norm(t):
+                continue
+            for line in t.splitlines():
+                m = _re.match(r"^([^\d,▲]+?)\s+([\d,\s]+)$", line.strip())
+                if not m:
+                    continue
+                name = norm(m.group(1))
+                nums = [to_number(x) for x in m.group(2).split()]
+                if len(nums) < 4:
+                    continue
+                out["全国" if name == "合計" else name] = nums[-2]
+            if out:
+                break
+    return out
+
+
+def parse_town_totals_march(path) -> dict:
+    """3 月分 PDF の「町村分」表(都道府県別の 3 月交付額・交付総額)。戻り値: {都道府県の短縮名 or '全国': [3月, 総額]}"""
+    out = {}
+    with pdfplumber.open(path) as pdf:
+        for p in pdf.pages:
+            words = p.extract_words()
+            hdr = [w for w in words if w["text"] == "都道府県名" and w["x0"] > p.width * 0.3]
+            if not hdr or "町村分" not in norm(p.extract_text() or ""):
+                continue
+            x0 = hdr[0]["x0"] - 5
+            bw = [w for w in words if w["x0"] >= x0 and w["top"] > hdr[0]["bottom"] + 1]
+            for row in _rows(bw):
+                nums = [to_number(w["text"]) for w in row if _NUM.match(w["text"])]
+                name = norm("".join(w["text"] for w in row if not _NUM.match(w["text"])))
+                if name and len(nums) >= 2:
+                    out["全国" if name == "計" else name] = nums[:2]
+    return out

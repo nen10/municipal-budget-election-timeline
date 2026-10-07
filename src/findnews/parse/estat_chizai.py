@@ -42,12 +42,15 @@ def iter_cells(path: str | Path, keep=None):
             continue
         if header is None or not r[0].strip().isdigit():
             continue
-        fy, code, table_no, row_no, row_name = int(r[0]), r[2].strip(), r[6].strip(), r[8].strip(), r[9].strip()
+        # 古い年度のファイルは先頭の 0 が落ちている(団体コード 11002、表番号 4、行番号 1)ので桁をそろえる
+        fy = int(r[0])
+        code, table_no, row_no, row_name = r[2].strip().zfill(6), r[6].strip().zfill(2), r[8].strip().zfill(2), r[9].strip()
         for i in range(10, min(len(r), len(header))):
             h = header[i].strip()
             if not h or ":" not in h:
                 continue
             ic, iname = h.split(":", 1)
+            ic = ic.strip().zfill(3)
             if keep and not keep(table_no, row_no, row_name, ic, iname):
                 continue
             yield Cell(fy, code, r[3].strip(), r[4].strip(), r[5].strip(), table_no, row_no, row_name, ic, iname,

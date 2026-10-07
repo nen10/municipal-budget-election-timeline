@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}自治体ビュー{% endblock %}
+{% block body %}
+<p class="kicker"><a href="index.html">{{ pref_name }}</a> / 自治体ビュー</p>
+<h1>自治体ごとの補助金・交付金・交付税の推移(計算方法を切り替えて表示)</h1>
+<p class="lead">{{ pref_name }}の {{ names|length }} 市町について、国の公表資料と決算統計から取った指標を自治体ごとに並べた。上の計算方法を選ぶと、すべてのグラフがその方法で計算し直される。各自治体の値は全国または県の合計(全体)と比べることもできるが、全体と比べた値は配分の妥当性や意図を示すものではない。</p>
+{% set show_overlay = true %}{% set show_level = true %}
+{% include "view_controls.html" %}
+
+<div class="tabs-head">
+  <label>自治体を選ぶ <select id="muni-select">{% for code, nm in names|dictsort %}<option value="{{ code }}">{{ nm }}({{ code }})</option>{% endfor %}</select></label>
+</div>
+<nav class="tablist-groups" aria-label="自治体(選挙区ごと)">
+{% for label, codes in tabs %}
+  <div class="tabgroup"><span class="tabgroup-label">{{ label }}</span>
+  <div role="tablist" aria-label="{{ label }}">{% for c in codes %}<button type="button" role="tab" id="tab-{{ loop.index }}-{{ c }}" data-code="{{ c }}" aria-controls="panel-{{ c }}" aria-selected="false" tabindex="-1">{{ names[c] }}</button>{% endfor %}</div></div>
+{% endfor %}
+</nav>
+
+{% for code, nm in names|dictsort %}
+<section role="tabpanel" id="panel-{{ code }}" aria-label="{{ nm }}" hidden>
+  <h2>{{ nm }}({{ code }})</h2>
+  <p class="small"><a href="municipalities/{{ code }}.html">{{ nm }}の詳細ページ(差分表・申請と要望・事業別・関係イベント・出典)</a></p>
+  <div class="charts"></div>
+  <h3>突き合わせ: 当初配分・交付決定・決算(社会資本整備総合交付金・防災・安全交付金)</h3>
+  <div class="table-wrap" style="max-height:none">
+  <table>
+    <caption>{{ nm }} 指標 4・10・6 の年度別(単位: 千円。調整はしていない)</caption>
+    <thead><tr><th scope="col">年度</th><th scope="col" class="num">指標 4 当初配分(単独計画、千円)</th><th scope="col" class="num">指標 10 交付決定(社総交+防安交、千円)</th><th scope="col" class="num">指標 6 決算 社会資本整備総合交付金(千円)</th><th scope="col" class="num">差 10 − 4(千円)</th><th scope="col" class="num">差 6 − 10(千円)</th></tr></thead>
+    <tbody>{% for r in recon[code] %}<tr><th scope="row">{{ r.y }}年度</th>
+      <td class="num">{{ r.a|num if r.a is not none else '未取得' }}</td><td class="num">{{ r.k|num if r.k is not none else '未取得' }}</td><td class="num">{{ r.c|num if r.c is not none else '未取得' }}</td>
+      <td class="num">{{ r.k_a|num if r.k_a is not none else '—' }}</td><td class="num">{{ r.c_k|num if r.c_k is not none else '—' }}</td></tr>{% endfor %}</tbody>
+  </table>
+  </div>
+  <p class="source-note">注: 差は調整していない。主な理由として考えられるもの(個別には確認していない): 指標 4 は単独で策定した計画の当初配分のみで、共同計画の自治体分・補正予算分を含まない。指標 10 は年度内の交付決定(変更減額を含む、前年度からの繰越分の決定を含みうる)。指標 6 は決算(繰越・精算後)で、決算統計の区分「社会資本整備総合交付金」に防災・安全交付金が含まれるかは調査票の定義による。出典: 国交省 配分資料、国交省 補助金等に関する情報開示、地方財政状況調査(e-Stat)。</p>
+</section>
+{% endfor %}
+<script type="application/json" id="view-data">{{ vjson|safe }}</script>
+<script src="static/views.js"></script>
+{% endblock %}

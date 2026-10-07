@@ -43,7 +43,7 @@ def test_site_build_all_pages_and_no_broken_links(tmp_path, fixtures):
     r = CliRunner().invoke(main, ["--db", str(dbp), "site", "build", "--pref", "09", "--out", str(out)])
     assert r.exit_code == 0, r.output
     for f in ["index.html", "events.html", "sources.html", "about.html", "static/style.css", "static/site.js",
-              "matrix/shugiin_20260208.html"]:
+              "static/views.js", "municipalities.html", "totals.html", "matrix/shugiin_20260208.html"]:
         assert (out / f).exists(), f
     munis = sorted((out / "municipalities").glob("*.html"))
     assert len(munis) == 25
@@ -73,3 +73,33 @@ def test_site_build_all_pages_and_no_broken_links(tmp_path, fixtures):
     # グラフの縦線は国政選挙の投票日だけ(DESIGN.md 13.5)。支持表明や報道は SVG に描かない
     for svg in re.findall(r"<svg.*?</svg>", m, re.S):
         assert "首長の支持表明" not in svg and "議員発言" not in svg and "役職就任" not in svg
+
+
+def test_views_pages(tmp_path, fixtures):
+    """第16節: 自治体ビュー(1 ページ・タブ)と全体ビュー。データは埋め込み JSON、注記 16.5 は常に表示。"""
+    import json
+
+    from findnews import db
+    from findnews.site.views import METHODS, NOTES_165
+    dbp = tmp_path / "v.sqlite"
+    c = db.connect(dbp)
+    db.init_db(c)
+    db.ensure_municipalities(c)
+    _load(c, fixtures)
+    c.close()
+    out = tmp_path / "site"
+    r = CliRunner().invoke(main, ["--db", str(dbp), "site", "build", "--pref", "09", "--out", str(out)])
+    assert r.exit_code == 0, r.output
+    m = (out / "municipalities.html").read_text(encoding="utf-8")
+    assert len(re.findall(r'role="tabpanel"', m)) == 25
+    assert len(set(re.findall(r'role="tab" id="[^"]+" data-code="(\d{6})"', m))) == 25
+    assert "表と出典を表示" not in m or "<details" in m
+    for page in ("municipalities.html", "totals.html"):
+        text = (out / page).read_text(encoding="utf-8")
+        for n in NOTES_165:
+            assert n in text, (page, n)
+        data = json.loads(re.search(r'<script type="application/json" id="view-data">(.*?)</script>', text, re.S).group(1))
+        assert set(data["methods"]) == set(METHODS)
+        assert data["defaultBase"] == 2024                     # 2026-02-08 の衆院選を含む FY2025 の前年度
+        assert data["order"]                                   # 少なくとも 1 指標
+    assert "突き合わせ" in m and "調整はしていない" in m

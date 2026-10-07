@@ -1,0 +1,20 @@
+<section class="notes-165" aria-label="注意">
+  <ul>{% for n in notes %}<li>{{ n }}</li>{% endfor %}</ul>
+</section>
+<form class="filters controls" onsubmit="return false" aria-label="計算方法">
+  <label>計算方法
+    <select id="method">{% for m in default_methods %}<option value="{{ m }}"{% if loop.first %} selected{% endif %}>{{ methods[m].name }}</option>{% endfor %}</select>
+  </label>
+  <label>その他の方法
+    <select id="method-other"><option value="">—</option>{% for m in other_methods %}<option value="{{ m }}">{{ methods[m].name }}</option>{% endfor %}</select>
+  </label>
+  {% if show_overlay %}<label class="inline"><input type="checkbox" id="overlay"> 全体の前年比(total_pct)を重ねる(前年比変化率のとき)</label>{% endif %}
+  {% if show_level %}<label>全体の範囲
+    <select id="level"><option value="national"{% if default_level == 'national' %} selected{% endif %}>全国</option><option value="prefecture"{% if default_level == 'prefecture' %} selected{% endif %}>{{ pref_name }}計</option></select>
+  </label>{% endif %}
+  <label>基準年(指数・累積差額)
+    <select id="base-year">{% for y in years_all %}<option value="{{ y }}"{% if y == default_base %} selected{% endif %}>{{ y }}年度</option>{% endfor %}</select>
+  </label>
+</form>
+<p class="small">選択中: <span id="method-label"></span>。{{ election_note }}。方向の閾値: 前年比・相対変化率 ±{{ '%.0f'|format(cfg_th.pct * 100) }}%、割合の前年差 ±{{ cfg_th.share_diff }} ポイント(config/settings.yaml)。</p>
+<noscript><p class="notice">グラフと計算方法の切り替えには JavaScript が必要。表は各自治体の詳細ページ(municipalities/&lt;コード&gt;.html)にある。</p></noscript>

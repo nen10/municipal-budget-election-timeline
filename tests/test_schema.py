@@ -10,9 +10,13 @@ def test_init_creates_all_tables(conn):
         assert t in tables
 
 
+# 行数の多い e-Stat の値表は、出典を (年度, 表番号, 行番号, 列) ごとに estat_labels に持つ(同じ URL を数百万行に複製しない)
+PROVENANCE_VIA = {"estat_values": "estat_labels", "estat_entities": "estat_labels"}
+
+
 def test_every_table_has_provenance_columns(conn):
     for t in db.TABLES:
-        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({t})")}
+        cols = {r[1] for r in conn.execute(f"PRAGMA table_info({PROVENANCE_VIA.get(t, t)})")}
         assert {"source_url", "retrieved_at"} <= cols, t
 
 

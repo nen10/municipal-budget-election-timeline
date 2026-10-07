@@ -23,22 +23,29 @@ LIST = ("https://www.e-stat.go.jp/stat-search/files?page={page}&layout=datalist&
         "&cycle=7&year={year}0&tclass1=000001077756&tclass2=000001077757&tclass3val=0")
 DL = "https://www.e-stat.go.jp/stat-search/file-download?statInfId={sid}&fileKind=1"
 
-# 04 表で保存する列(行番号 01: 交付税・国庫支出金の区分。行番号 02: 都道府県支出金の区分)
-T04_R01 = {"023", "024", "025", "026"} | {f"{i:03d}" for i in range(43, 70)}
-T04_R02 = {"001", "002", "016", "052"}
+# 04 表で保存する列(行番号 01: 交付税・国庫支出金の区分。行番号 02: 都道府県支出金の区分)。
+# 列番号は年度で変わる(2020 年度は国庫支出金が 045、2024 年度は 043)ため、列名で選ぶ
+T04_R01 = {"地方交付税", "普通交付税", "特別交付税", "震災復興特別交付税", "国庫支出金", "義務教育費負担金",
+           "生活保護費負担金", "児童保護費等負担金", "障害者自立支援給付費等負担金", "児童手当等交付金",
+           "普通建設事業費支出金", "災害復旧事業費支出金", "委託金", "社会資本整備総合交付金",
+           "特定防衛施設周辺整備調整交付金", "電源立地地域対策交付金", "地方創生関係交付金",
+           "デジタル田園都市国家構想交付金", "新しい地方経済・生活環境創生交付金",
+           "新型コロナウイルス感染症対応地方創生臨時交付金", "物価高騰対応重点支援地方創生臨時交付金",
+           "国有提供施設等所在市町村助成交付金"}
+T04_R02 = {"都道府県支出金", "国庫財源を伴うもの", "都道府県費のみのもの", "歳入合計"}
 FIN_ROWS = {"25", "26", "27", "34", "35"}        # 07〜13 表: 歳出合計・国庫支出金・都道府県支出金・地方債・一般財源等
 
 
 def keep(table_no, row_no, row_name, item_code, item_name) -> bool:
     if table_no == "04":
-        return (row_no == "01" and item_code in T04_R01) or (row_no == "02" and item_code in T04_R02)
+        return (row_no == "01" and item_name in T04_R01) or (row_no == "02" and item_name in T04_R02)
     if table_no in ("07", "08", "09", "10", "11", "12", "13"):
-        if row_no not in FIN_ROWS:
+        if row_name not in ("歳出合計", "国庫支出金", "都道府県支出金", "地方債", "一般財源等"):
             return False
         return table_no == "10" or "総額" in item_name or "・" not in item_name   # 10 表(土木費)は全項目、他は款の総額
     if table_no == "21":
         return row_name in ("補助事業費", "土木費", "道路", "橋りょう", "河川", "都市計画", "農業農村整備") and \
-            item_code in ("001", "005", "006", "008", "010")
+            any(k in item_name for k in ("決算額", "国庫支出金", "都道府県支出金", "地方債", "一般財源等"))
     if table_no == "70":
         return row_name in ("道路橋りょう費", "合計")
     return False

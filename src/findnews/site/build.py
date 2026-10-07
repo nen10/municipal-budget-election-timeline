@@ -292,7 +292,7 @@ def build(conn: sqlite3.Connection, pref: str, out_dir: Path | None = None) -> d
     (out / "municipalities").mkdir(parents=True)
     (out / "matrix").mkdir()
     (out / "static").mkdir()
-    for f in ("style.css", "site.js"):
+    for f in ("style.css", "site.js", "views.js"):
         shutil.copy(HERE / "static" / f, out / "static" / f)
     e = env()
     cfg = settings_mod.load()
@@ -397,4 +397,18 @@ def build(conn: sqlite3.Connection, pref: str, out_dir: Path | None = None) -> d
                                             ORDER BY source, step""")]
     write("sources.html", "sources.html", status=status, log=log, cfg=cfg, keywords=KEYWORDS, years=years, cov=cov)
     write("about.html", "about.html")
+    # 自治体ビュー・全体ビュー(DESIGN.md 16・17 節)
+    from . import views as V
+    from .. import requests as RQ
+    reqs_by_code = {c: RQ.for_municipality(conn, c) for c in names}
+    vdata = V.build_data(conn, pref, trows, events, districts, reqs_by_code, cfg)
+    vjson = V.to_json(vdata)
+    years_all = sorted({p["y"] for m in vdata["munis"].values() for s in m["series"].values() for p in s})
+    recon = {c: V.reconciliation(conn, c) for c in names}
+    tabs = V.district_tabs(conn, pref, names)
+    vctx = dict(vjson=vjson, cfg_th=vdata["thresholds"], methods=V.METHODS, default_methods=V.DEFAULT_METHODS, other_methods=V.OTHER_METHODS,
+                notes=V.NOTES_165, years_all=years_all, default_base=vdata["defaultBase"], default_level=vdata["defaultLevel"],
+                election_note=vdata["election_note"])
+    write("municipalities.html", "view_munis.html", tabs=tabs, names=names, recon=recon, **vctx)
+    write("totals.html", "view_totals.html", **vctx)
     return {"out": str(out), "pages": len(pages), "files": pages}

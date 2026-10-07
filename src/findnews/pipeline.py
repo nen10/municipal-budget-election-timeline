@@ -14,7 +14,10 @@ from .municipalities import has_master, load_masters
 from .sources import INDICATOR_SOURCES, election_source
 from .sources.base import Observation
 
-ORDER = ["soumu_jumin", "soumu_card", "soumu_tokko", "mlit_grants", "mlit_road", "election", "requests", "kokkai"]
+ORDER = ["soumu_jumin", "soumu_card", "soumu_tokko", "mlit_grants", "mlit_road", "election", "requests", "kokkai",
+         "estat_chizai", "soumu_futsu", "mlit_kofu", "baseline"]
+# 第17節の全国・全自治体を対象とする基盤層。--years の各年度について取得する(都道府県に依存しない)。
+BASELINE_FETCHERS = {"estat_chizai": "estat_chizai", "soumu_futsu": "soumu_futsu", "mlit_kofu": "mlit_kofu"}
 
 
 def store_observations(conn: sqlite3.Connection, obs: list[Observation]) -> int:
@@ -94,6 +97,18 @@ def run(conn: sqlite3.Connection, pref_code: str, years: list[int] | None = None
         elif sid == "kokkai":
             from .fetch import kokkai
             out[sid] = kokkai.run(conn, offline=offline)
+        elif sid in BASELINE_FETCHERS:
+            import importlib
+            mod = importlib.import_module(f".fetch.{BASELINE_FETCHERS[sid]}", __package__)
+            try:
+                out[sid] = mod.run(conn, years or [], offline=offline, force=force)
+            except Exception as e:  # noqa: BLE001
+                db.log_fetch(conn, sid, "run", "error", repr(e))
+                out[sid] = {"status": "error", "reason": repr(e)}
+        elif sid == "baseline":
+            # 取り込んだ基盤層(estat_values / municipality_fiscal / grant_decisions)から指標 6〜10 と全体合計を作る
+            from . import baseline
+            out[sid] = baseline.build(conn, pref_code)
         else:
             out[sid] = {"status": "未対応", "reason": f"ソース {sid} はレジストリにない"}
     manual.load_all(conn)

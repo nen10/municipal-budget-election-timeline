@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}全体ビュー{% endblock %}
+{% block body %}
+<p class="kicker"><a href="index.html">{{ pref_name }}</a> / 全体ビュー</p>
+<h1>国と{{ pref_name }}の合計の推移(制度ごと)</h1>
+<p class="lead">交付金・補助金・交付税の全国の合計と{{ pref_name }}内の合計を、制度ごとに年度の推移で示す。系列名に全体の定義(全国か県計か、当初配分・交付決定・決算のどれか)を書いている。取れない年度は未取得のままにしている。</p>
+{% set show_overlay = false %}{% set show_level = false %}
+{% include "view_controls.html" %}
+<div id="totals-charts"></div>
+<script type="application/json" id="view-data">{{ vjson|safe }}</script>
+<script src="static/views.js"></script>
+{% endblock %}

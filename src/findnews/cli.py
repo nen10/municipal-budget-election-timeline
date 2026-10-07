@@ -76,7 +76,8 @@ def db_init(ctx):
 @click.option("--pref", default="09", show_default=True, help="都道府県コード 2 桁")
 @click.option("--years", default="2020-2026", show_default=True, help="対象年度(例: 2021-2026、2024,2025)")
 @click.option("--source", "sources", multiple=True,
-              help="ソース ID(複数可。soumu_jumin, soumu_card, soumu_tokko, mlit_grants, mlit_road, election, kokkai)。省略時は全部")
+              help="ソース ID(複数可。soumu_jumin, soumu_card, soumu_tokko, mlit_grants, mlit_road, election, requests, kokkai, "
+                   "estat_chizai, soumu_futsu, mlit_kofu, baseline)。省略時は全部")
 @click.option("--offline", is_flag=True, help="ネットワークに出ず data/raw の既存ファイルだけをパース")
 @click.option("--force", is_flag=True, help="保存済みでも再ダウンロード")
 @click.pass_context

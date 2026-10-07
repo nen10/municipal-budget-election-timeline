@@ -10,6 +10,8 @@
 <header class="site">
   <a class="title" href="{{ root }}index.html">find-news 要検証シグナル({{ pref_name }})</a>
   <nav aria-label="サイト内">
+    <a href="{{ root }}municipalities.html"{% if page == 'municipalities.html' %} aria-current="page"{% endif %}>自治体ビュー</a>
+    <a href="{{ root }}totals.html"{% if page == 'totals.html' %} aria-current="page"{% endif %}>全体ビュー</a>
     <a href="{{ root }}index.html"{% if page == 'index.html' %} aria-current="page"{% endif %}>概要</a>
     {% if groups %}<a href="{{ root }}matrix/{{ groups[0].id }}.html"{% if page.startswith('matrix/') %} aria-current="page"{% endif %}>マトリックス</a>{% endif %}
     <a href="{{ root }}events.html"{% if page == 'events.html' %} aria-current="page"{% endif %}>イベント</a>

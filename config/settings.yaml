@@ -2,3 +2,11 @@
 verification:
   period: [2021, 2026]          # 対象年度(西暦の会計年度)
   direction_threshold: 0.05     # 増減方向の閾値: +5% 以上=増加、-5% 以下=減少、その間=横ばい
+
+# 計算方法ごとの方向の閾値(DESIGN.md 16.4)。pct・rel_pct は割合(0.05 = 5%)、share_diff はポイント(0.1 = 0.1 ポイント)。
+# raw・diff・index・cum_diff は前年比変化率(pct)の閾値で方向を決める。diff2 は差分の差分 ÷ 前年値に pct の閾値を使う。
+methods:
+  pct: 0.05
+  rel_pct: 0.05
+  share_diff: 0.1
+  default_total_level: national   # national(全国) / prefecture(都道府県計)

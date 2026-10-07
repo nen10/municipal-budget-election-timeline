@@ -9,6 +9,7 @@ import yaml
 from . import config
 
 DEFAULTS = {
+    "methods": {"pct": 0.05, "rel_pct": 0.05, "share_diff": 0.1, "default_total_level": "national"},
     "verification": {
         "period": [2021, 2026],
         "direction_threshold": 0.05,

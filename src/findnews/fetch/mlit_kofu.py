@@ -173,6 +173,8 @@ def run(conn: sqlite3.Connection, fiscal_years: list[int], offline: bool = False
                      meta.get("retrieved_at")))
         conn.commit()
         db.log_fetch(conn, SOURCE, "load", "ok" if n_local else "error",
-                     f"FY{fy}: 交付決定 {n} 行(うち地方公共団体 {n_local})" + (f" errors={errors[:3]}" if errors else ""))
+                     f"FY{fy}: 交付決定 {n} 行(うち地方公共団体 {n_local})" + (f" errors={errors[:3]}" if errors else "")
+                     + ("。法人番号の列がない様式(FY2016 以前は交付先名のみ、FY2010 は交付先もない)のため団体コードに"
+                        "結び付けられず未取得" if n == 0 else ""))
         res[fy] = {"rows": n, "local_gov_rows": n_local, "errors": len(errors)}
     return res
