@@ -34,7 +34,7 @@ def run(conn: sqlite3.Connection, pref_code: str = "09", k: int = 5, out_dir: Pa
 
     series = panel_mod.metric_series(conn, pref_code)
     groups, feats = peers_mod.peer_groups(conn, pref_code, k=k)
-    dev = peers_mod.peer_deviation(series, groups) if not series.empty else pd.DataFrame()
+    dev = peers_mod.peer_deviation(series, groups, feats) if not series.empty else pd.DataFrame()
     pnl = panel_mod.politician_panel(conn)
     st = load_statements(conn)
     positions = pd.read_sql_query("SELECT * FROM positions", conn)

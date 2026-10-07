@@ -48,6 +48,41 @@ def _table(headers, rows) -> str:
     return "\n".join(out)
 
 
+def joint_plan_changes(conn: sqlite3.Connection, code: str) -> list[str]:
+    rows = conn.execute(
+        """SELECT fiscal_year, program_id, item_name, amount_thousand_yen FROM subsidy_allocations
+           WHERE program_id IN ('mlit_shasoukou','mlit_bouan') AND attribution='joint'
+             AND (',' || recipient_codes || ',') LIKE ? ORDER BY fiscal_year, item_name""", (f"%,{code},%",)).fetchall()
+    by_year: dict[int, dict[str, float]] = {}
+    for r in rows:
+        by_year.setdefault(r[0], {})[r[2]] = r[3]
+    out = []
+    prev = None
+    for fy in sorted(by_year):
+        cur = by_year[fy]
+        line = f"- FY{fy}: {len(cur)} 件"
+        if prev is not None:
+            added = sorted(set(cur) - set(prev))
+            removed = sorted(set(prev) - set(cur))
+            if added:
+                line += " / 新たに含まれた: " + "、".join(added)
+            if removed:
+                line += " / 含まれなくなった: " + "、".join(removed)
+        out.append(line)
+        prev = cur
+    out.append("  (計画名の期替わり(第三期→第四期など)も「含まれなくなった/新たに含まれた」として表示される)")
+    return out
+
+
+def latest_errors(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
+    """(source, step, 対象) ごとに最新の記録がエラーのものだけを返す(後で成功したものは除く)。"""
+    latest: dict[tuple, tuple] = {}
+    for r in conn.execute("SELECT source, step, status, detail, source_url FROM fetch_log ORDER BY id"):
+        target = (r["detail"] or "").split(":")[0] if r["step"] == "parse" else (r["source_url"] or r["detail"])
+        latest[(r["source"], r["step"], target)] = (r["status"], r["detail"] or "")
+    return [(k[0], k[1], v[1]) for k, v in latest.items() if v[0] == "error"]
+
+
 def render(conn: sqlite3.Connection, run_id, pref_code, k, series, dev, groups, feats, pnl, sig, st, focus) -> str:
     L = [f"# 要検証シグナル レポート(都道府県コード {pref_code})", "", f"run_id: `{run_id}`", "", DISCLAIMER, ""]
 
@@ -62,10 +97,17 @@ def render(conn: sqlite3.Connection, run_id, pref_code, k, series, dev, groups, 
     L += ["", "金額の単位は千円。年度は西暦の会計年度(令和6年度 = 2024)。",
           "選挙(2026-02-08)より後に決定された値を「選挙後」とみなす: 国交省の当初配分は FY2026(2026 年 4 月公表)、"
           "特別交付税は FY2025 の 3 月分(2026-03-17 決定)。決算カードは FY2024 が最新で、選挙後の決算値はまだ存在しない。", ""]
-    fl = conn.execute("SELECT source, step, status, detail FROM fetch_log WHERE status='error' ORDER BY id DESC LIMIT 20").fetchall()
-    if fl:
-        L += ["取得・パースでエラーが記録されたもの(fetch_log):", ""]
-        L += [f"- {r['source']} / {r['step']}: {r['detail'][:200]}" for r in fl]
+    # 決算カードと報道発表の特別交付税の突合(同じ値になるはず)
+    chk = conn.execute(
+        """SELECT COUNT(*), SUM(ABS(f.value - a.amount_thousand_yen) < 0.5) FROM municipality_fiscal f
+           JOIN subsidy_allocations a ON a.municipality_code=f.code AND a.fiscal_year=f.fiscal_year
+           WHERE f.item='特別交付税' AND f.source='soumu_card' AND a.program_id='soumu_tokko' AND a.item_name='交付総額'""").fetchone()
+    if chk and chk[0]:
+        L += [f"検算: 決算カードの特別交付税と報道発表の交付総額が一致した市×年度 {chk[1]} / {chk[0]}。", ""]
+    errs = latest_errors(conn)
+    if errs:
+        L += ["最新の実行でエラーのままの取得・パース(fetch_log):", ""]
+        L += [f"- {s_} / {st_}: {d_[:200]}" for s_, st_, d_ in errs]
         L.append("")
 
     # 2. ピア
@@ -104,9 +146,17 @@ def render(conn: sqlite3.Connection, run_id, pref_code, k, series, dev, groups, 
                 if pd.isna(r.growth):
                     row.append(f"{val}{mark}")
                 else:
-                    row.append(f"{val}{mark}<br>g={r.growth:+.2f} / 中央値={r.peer_median_growth:+.2f}<br>z={_fmt(r.z, 2)}")
+                    med = "—" if pd.isna(r.peer_median_growth) else f"{r.peer_median_growth:+.2f}"
+                    row.append(f"{val}{mark}<br>g={r.growth:+.2f} / 中央値={med}<br>z={_fmt(r.z, 2)}")
             rows.append(row)
         L += [_table(["指標"] + [str(int(y)) for y in years], rows), ""]
+        alt = {m: p_ for m, p_ in d.groupby("metric")["peers"].first().items() if p_ != ",".join(groups.get(c, []))}
+        for m, p_ in alt.items():
+            L.append(f"- {METRIC_LABEL.get(m, m)} のピア(値のある自治体から選択): "
+                     + "、".join(TOCHIGI.get(x, x) for x in p_.split(",") if x))
+        L += ["", f"**{TOCHIGI.get(c, c)} が策定主体に含まれる共同計画(社総交・防安交、金額は計画全体で按分不能)**", ""]
+        L += joint_plan_changes(conn, c)
+        L.append("")
 
     # 4. シグナル
     L += ["## 4. 寄与内訳つきスコア", "",
