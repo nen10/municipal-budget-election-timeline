@@ -234,7 +234,7 @@ find-news/
 1. **前年差額** `d_t = x_t − x_{t−1}` と **前年比変化率** `g_t = d_t / x_{t−1}`。`x_{t−1}` が 0 または未取得なら「未定義」と出す。
 2. **年度ごとの増減方向**: `g_t` が +5% 以上なら「増加」、−5% 以下なら「減少」、その間なら「横ばい」、未定義なら「未取得」。閾値 5% は設定ファイルで変更可能にし、出力に明記する。
 3. **過去最大値からの減少**: 対象期間内の最大値とその年度、最新年度の値、最大値からの減少額と減少率。
-4. **選挙前後の変化**(指標 3〜5): 指標 4、5 は 2023〜2025 年度の平均を「選挙前」、2026 年度当初配分を「選挙後」とする。指標 3 は 2022〜2024 年度の 3 月分の平均を「選挙前」、2025 年度 3 月分(2026 年 3 月交付)を「選挙後」とする(2025 年度 3 月分は選挙後の値なので選挙前の平均に含めない)。差額、変化率、および 2 項と同じ閾値による方向(増加・横ばい・減少・未取得)を出す。
+4. **選挙前後の変化**(指標 3〜5): 平均との比較は行わない。第13節の差分時系列で、選挙投票日の直後に来る最初のデータ時点の差分(直前時点比)を「選挙後最初の差分」として扱う。
 5. **事業別の分類**(指標 4、5): 事業名を前年度と突合し、「継続(増額)」「継続(減額)」「継続(同額)」「新規」「消滅」に分類する。継続(減額)と消滅の事業は個別に列挙する。
 
 ### 10.5 出力の形式
@@ -293,9 +293,9 @@ find-news/
 
 A1 と A2 は一致するとは限らない(首長は勝者を支持したが住民は敗者に投票、など)。両方を保持し、両方で表を作る。
 
-### 11.2 軸 B: 補助金の選挙前後の増減
+### 11.2 軸 B: 補助金の選挙後最初の差分
 
-第10節 10.4 の 4 項で得た「選挙前後の方向」(増加・横ばい・減少・未取得)を指標 3、4、5 それぞれについて使う。閾値は 10.4 と同じ。
+第13節の差分時系列から、選挙投票日の直後に来る最初のデータ時点の「直前時点比の方向」(増加・横ばい・減少・未取得)を指標 3、4、5 それぞれについて使う。閾値は 10.4 と同じ。平均との比較は使わない。
 
 ### 11.3 マトリックスの作り方
 
@@ -337,3 +337,111 @@ A1 と A2 は一致するとは限らない(首長は勝者を支持したが住
 6. **人口の年度対応**: 2026 年度に対応する住民基本台帳人口は存在しない。どの日付の人口をどの年度に対応させるかを決める。
 7. **陰性事例**: 誤検知率を測るための陰性事例が 0 件。
 8. **発言キーワードの独立性**: 「大幅にカット」は報道された簗氏の発言から追加したキーワードなので、この事例での一致は独立した検証にならない。キーワードの由来を記録し、由来事例への適用は検証に数えない。
+
+## 13. 差分時系列と政局イベントの対応
+
+### 13.1 方針
+
+- 各自治体 × 各指標について、観測時点ごとの値 `x_t` と、直前の観測時点に対する差分 `Δx_t = x_t − x_{t−1}`、変化率 `Δx_t / x_{t−1}`、方向(10.4 の閾値)を時系列表にする。平均との比較は行わない。
+- 同じ時間軸に政局イベントを並べ、各差分がどのイベントの後に観測されたかを機械的に対応付ける。判断は人が行い、システムは対応表を出すだけにする。
+- 観測時点は指標ごとに異なる(年度、半期、配分回)。年度に丸めず、指標が持つ最も細かい時点をそのまま使う。
+
+### 13.2 観測時点の定義
+
+各観測値に次の 3 つの日付を持たせる。
+
+| 日付 | 意味 | 例(道路局当初配分 2026 年度) |
+|---|---|---|
+| `period_start` / `period_end` | 値が対象とする期間 | 2026-04-01 〜 2027-03-31 |
+| `decided_date` | 値が決まった日(配分決定日、交付決定日、算定日) | 2026-04-07(当初配分公表日を代用、根拠を記録) |
+| `published_date` | 公表日 | 2026-04-07 |
+
+差分 `Δx_t` の「対応期間」は `decided_date(t−1)` の翌日から `decided_date(t)` までとする。この期間内に起きたイベントを、その差分に対応するイベントとして列挙する。`decided_date` が不明な指標は `published_date` を代用し、代用したことを列に記録する。
+
+指標ごとの観測時点:
+
+| 指標 | 観測時点 | decided_date の根拠 |
+|---|---|---|
+| 1, 2 決算カード | 年度(決算) | 年度末(3 月 31 日)。公表は翌年度 |
+| 3 特別交付税 | 12 月分、3 月分の 2 時点/年度 | 総務省の交付決定日(報道発表日) |
+| 4 社会資本整備総合交付金 | 当初配分、補正配分(公表されれば)の各回 | 配分公表日 |
+| 5 道路局箇所表 | 当初配分の各回 | 配分公表日 |
+
+### 13.3 政局イベント(`events` テーブル、`data/manual/events.csv`)
+
+公開情報で確認できるものだけを登録する。出典のないイベントは入れない。
+
+| 列 | 内容 |
+|---|---|
+| event_id | 一意 ID |
+| date | イベントの日付(期間イベントは start/end) |
+| event_type | 衆院選投票 / 参院選投票 / 知事選投票 / 首長選投票 / 内閣発足・改造 / 役職就任 / 役職退任 / 党役職就任 / 議員発言(報道) / 省庁への問い合わせ(報道) / 予算配分公表 / 補正予算成立 / 首長の支持表明 / その他 |
+| scope | national / prefecture / district / municipality |
+| pref_code, district, municipality_code | 影響範囲(該当するもののみ) |
+| actor_name, actor_party, actor_role | 当事者の氏名、政党、当時の役職 |
+| counterpart_name, counterpart_role | 相手方(問い合わせ先の役職など) |
+| summary | 事実の一文(結論的表現なし) |
+| quote | 原文の引用 |
+| source_url, outlet, source_date | 出典 |
+| retrieved_at | 取得日 |
+
+機械的に生成できるイベント(選挙投票日、閣僚就任、配分公表日)は取得スクリプトが `events` に自動登録し、`generated_by` 列にモジュール名を入れる。報道由来のイベントは手作業で CSV に追加する。
+
+### 13.4 出力
+
+- `data/processed/timeline_<pref>.csv`(長形式): 1 行 = 自治体 × 指標 × 観測時点。列は municipality_code, municipality_name, indicator_id, period_start, period_end, decided_date, decided_date_is_proxy, published_date, value, unit, delta, delta_pct, direction, window_start, window_end, event_ids(対応期間内のイベント ID を `;` 区切り), source_url。
+- `data/processed/timeline_<pref>/<municipality_code>.md`: 自治体ごとに、指標別の差分表と、その自治体に対応するイベント(scope が municipality / district / prefecture / national のすべて)を日付順に並べた表。差分表の各行にはその行の対応期間内のイベントを氏名・政党・種別つきで表示する。
+- `data/processed/events_<pref>.md`: 登録済みイベントの一覧(日付順、出典つき)。
+
+## 14. インターフェイス設計(他地域への展開)
+
+### 14.1 原則
+
+- 都道府県コード(2 桁)と選挙 ID を引数に取る。栃木県固有の値をコードに埋め込まない。
+- データソースごとに「アダプタ」を分け、共通の出力形式に揃える。都道府県で形式が違うソース(県選管の得票)は、都道府県ごとにアダプタを登録する仕組みにする。
+- 手作業データ(支持表明、イベント、役職)は都道府県に依存しない共通スキーマの CSV にし、`pref_code` 列で区別する。
+
+### 14.2 アダプタのインターフェイス
+
+```python
+class IndicatorSource(Protocol):
+    indicator_id: str            # "tokko_march" など
+    coverage: str                # "national" | "prefecture"
+    def list_documents(self, pref_code: str, years: list[int]) -> list[Document]: ...
+    def fetch(self, doc: Document, dest: Path) -> Path: ...
+    def parse(self, path: Path, pref_code: str) -> list[Observation]: ...
+
+class ElectionSource(Protocol):
+    pref_code: str               # 都道府県ごとに実装
+    def list_elections(self) -> list[ElectionDoc]: ...
+    def fetch(self, doc: ElectionDoc, dest: Path) -> Path: ...
+    def parse(self, path: Path) -> tuple[Election, list[Candidate], list[ElectionResult]]: ...
+```
+
+`Observation` は 13.2 の 3 つの日付と value、unit、source_url、municipality_code を持つ。`Document` は URL、公表日、対象年度、取得日を持つ。
+
+アダプタはレジストリに登録し、`findnews sources list` で一覧できるようにする。都道府県に未対応のソース(その県の選管アダプタがない等)は、実行時に「未対応」として出力に明記し、エラーにしない。
+
+### 14.3 CLI
+
+```
+findnews fetch   --pref <2桁> --years 2021-2026 [--source <id>]
+findnews events  import data/manual/events.csv
+findnews events  generate --pref <2桁>          # 選挙・就任・公表日を自動登録
+findnews timeline --pref <2桁> [--muni <6桁>] [--indicator <id>]
+findnews matrix  --pref <2桁> --election <選挙ID>
+findnews verify  --pref <2桁>
+findnews sources list
+```
+
+### 14.4 新しい都道府県を追加する手順(README に記載)
+
+1. `findnews fetch --pref <code>` で全国対応ソース(決算カード、特別交付税、国交省配分)を取得する。
+2. その県の選管アダプタを `src/findnews/fetch/elections/<code>_<name>.py` に実装し、レジストリに登録する。
+3. `data/manual/endorsements.csv`、`events.csv`、`positions.csv` にその県の行を出典つきで追加する。
+4. `findnews events generate`、`findnews timeline`、`findnews matrix` を実行する。
+5. 未対応・未収集の件数が出力の冒頭に出ることを確認する。
+
+### 14.5 出力の結合
+
+全出力は `pref_code` と `municipality_code`(全国地方公共団体コード)を持つ長形式 CSV を正とし、複数県の出力をそのまま縦に結合できるようにする。Markdown は CSV から生成する。

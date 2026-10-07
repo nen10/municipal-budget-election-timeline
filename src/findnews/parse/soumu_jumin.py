@@ -14,6 +14,25 @@ import openpyxl
 from .common import norm, to_number
 
 
+def parse_names(path: str | Path) -> dict[str, tuple[str, str]]:
+    """{code: (都道府県名, 市区町村名)}。都道府県計(xx0000)と郡計(名称が「郡」で終わる)は除く。
+    「芳賀郡益子町」のような郡名つきは郡名を除く。"""
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    rows = list(wb.worksheets[0].iter_rows(values_only=True))
+    wb.close()
+    out = {}
+    for r in rows:
+        code = norm(r[0]) if r and r[0] is not None else ""
+        if not re.fullmatch(r"\d{6}", code) or code.endswith("0000"):
+            continue
+        name = norm(r[2])
+        if not name or name == "-" or name.endswith("郡"):
+            continue
+        m = re.match(r"^.+?郡(.+[町村])$", name)
+        out[code] = (norm(r[1]), m.group(1) if m else name)
+    return out
+
+
 def parse_workbook(path: str | Path) -> tuple[str | None, dict[str, float]]:
     """戻り値: (基準日 YYYY-MM-DD, {code: 人口})"""
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)

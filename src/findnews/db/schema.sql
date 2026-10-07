@@ -210,3 +210,50 @@ CREATE TABLE IF NOT EXISTS fetch_log (
     source_url      TEXT,
     retrieved_at    TEXT
 );
+
+-- 観測値(DESIGN.md 13.2)。指標ごとの最も細かい観測時点(年度、12 月分・3 月分、配分回)を 1 行とする。
+CREATE TABLE IF NOT EXISTS observations (
+    pref_code       TEXT NOT NULL,
+    municipality_code TEXT NOT NULL,
+    indicator_id    TEXT NOT NULL,             -- card_kokko / card_pref / tokko_dec / tokko_march / mlit_sole_grants / mlit_road
+    period_start    TEXT NOT NULL,             -- 値が対象とする期間
+    period_end      TEXT NOT NULL,
+    decided_date    TEXT,                      -- 値が決まった日(配分決定日・交付決定日・決算は年度末)
+    decided_date_is_proxy INTEGER,             -- 1 = 公表日などで代用
+    decided_date_basis TEXT,                   -- decided_date の根拠
+    published_date  TEXT,                      -- 公表日(不明なら NULL)
+    value           REAL,                      -- NULL = 未取得
+    unit            TEXT,
+    count           INTEGER,                   -- 事業数・箇所数(指標 4・5)
+    missing_reason  TEXT,
+    source_url      TEXT,
+    retrieved_at    TEXT,
+    generated_by    TEXT,                      -- アダプタ ID
+    PRIMARY KEY (municipality_code, indicator_id, period_start, decided_date)
+);
+
+-- 政局イベント(DESIGN.md 13.3)。出典のないイベントは入れない。
+CREATE TABLE IF NOT EXISTS events (
+    event_id        TEXT PRIMARY KEY,
+    date            TEXT NOT NULL,             -- 開始日(月までしか分からない場合は月初、date_precision に記録)
+    end_date        TEXT,                      -- 期間イベントの終了日(単日なら NULL)
+    date_precision  TEXT,                      -- day / month / period
+    event_type      TEXT NOT NULL,
+    scope           TEXT NOT NULL,             -- national / prefecture / district / municipality
+    pref_code       TEXT,
+    district        TEXT,                      -- 例: 栃木県第3区
+    municipality_code TEXT,
+    actor_name      TEXT,
+    actor_party     TEXT,
+    actor_role      TEXT,
+    counterpart_name TEXT,
+    counterpart_role TEXT,
+    summary         TEXT,
+    quote           TEXT,
+    source_url      TEXT,
+    outlet          TEXT,
+    source_date     TEXT,
+    note            TEXT,
+    generated_by    TEXT,                      -- 自動生成したモジュール名(手作業は NULL)
+    retrieved_at    TEXT
+);

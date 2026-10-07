@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 import unicodedata
 
-PREF_NAMES = {"09": "栃木県"}
+from .prefs import PREFS as PREF_NAMES  # noqa: E402  (互換のため残す)
 
 # (5 桁コード, 名称)
 _TOCHIGI_5 = [
@@ -39,6 +39,40 @@ def code6(code5: str) -> str:
 TOCHIGI: dict[str, str] = {code6(c): n for c, n in _TOCHIGI_5}  # code6 -> name
 NAME_TO_CODE: dict[str, str] = {n: c for c, n in TOCHIGI.items()}
 
+# 都道府県ごとの市区町村マスタ(code -> name)。栃木県は内蔵、他県は DB の municipalities
+# (総務省 住民基本台帳人口の市区町村別ファイルから投入)を load_masters() で読み込む。
+_MASTERS: dict[str, dict[str, str]] = {"09": dict(TOCHIGI)}
+
+
+class MasterNotAvailable(LookupError):
+    """その都道府県の市区町村マスタがない(未対応)。"""
+
+
+def set_master(pref_code: str, mapping: dict[str, str]) -> None:
+    if mapping:
+        _MASTERS[pref_code] = dict(mapping)
+
+
+def load_masters(conn) -> list[str]:
+    """DB の municipalities から全都道府県のマスタを読み込む。読み込んだ都道府県コードを返す。"""
+    got: dict[str, dict[str, str]] = {}
+    for r in conn.execute("SELECT code, name, pref_code FROM municipalities"):
+        got.setdefault(r[2], {})[r[0]] = r[1]
+    for p, m in got.items():
+        if p != "09" or len(m) >= len(TOCHIGI):
+            set_master(p, m)
+    return sorted(got)
+
+
+def master(pref_code: str) -> dict[str, str]:
+    if pref_code not in _MASTERS:
+        raise MasterNotAvailable(f"都道府県 {pref_code} の市区町村マスタがない(fetch --source soumu_jumin で取得)")
+    return _MASTERS[pref_code]
+
+
+def has_master(pref_code: str) -> bool:
+    return pref_code in _MASTERS
+
 
 def normalize_name(s: str) -> str:
     """空白(全角含む)と NFKC 差を除去した名称。PDF 抽出で「那 須 烏 山」となる場合に対応。"""
@@ -53,14 +87,19 @@ def stem(name: str) -> str:
 
 
 def lookup(name: str, pref_code: str = "09") -> str | None:
-    """自治体名から 6 桁コードを返す。「宇都宮市第１」のような開票区名も先頭一致で解決する。"""
+    """自治体名から 6 桁コードを返す。「宇都宮市第１」のような開票区名、「芳賀郡益子町」のような郡名つきも解決する。"""
     n = normalize_name(name)
-    if n in NAME_TO_CODE:
-        return NAME_TO_CODE[n]
-    # 開票区(例: 宇都宮市第1)
-    for nm, c in NAME_TO_CODE.items():
-        if n.startswith(nm) and c.startswith(pref_code):
-            return c
+    m = master(pref_code)
+    rev = {normalize_name(v): k for k, v in m.items()}
+    if n in rev:
+        return rev[n]
+    g = re.match(r"^.+?郡(.+[町村])$", n)
+    if g and g.group(1) in rev:
+        return rev[g.group(1)]
+    # 開票区(例: 宇都宮市第1)。長い名称から先に照合する
+    for nm in sorted(rev, key=len, reverse=True):
+        if n.startswith(nm):
+            return rev[nm]
     return None
 
 

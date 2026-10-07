@@ -1,4 +1,4 @@
-"""総務省 市町村決算カード(栃木県分)の取得。
+"""総務省 市町村決算カード(都道府県別 Excel)の取得。都道府県コードを引数に取る(既定は栃木県 09)。
 
 一覧ページ: https://www.soumu.go.jp/iken/zaisei/card.html
   → 年度別ページ(例: 令和6年度 https://www.soumu.go.jp/iken/zaisei/card-25.html)
@@ -21,13 +21,12 @@ from bs4 import BeautifulSoup
 from .. import db, http
 from ..parse import soumu_card as P
 from ..parse.common import era_year_to_ad
+from ..prefs import name as pref_name
 
 SOURCE = "soumu_card"
 INDEX_URL = "https://www.soumu.go.jp/iken/zaisei/card.html"
-PREF_LABEL = "栃木県"
-
-
-def list_sources(n_years: int = 5, pref_label: str = PREF_LABEL) -> list[dict]:
+def list_sources(n_years: int = 5, pref_code: str = "09", years: list[int] | None = None) -> list[dict]:
+    pref_label = pref_name(pref_code)
     soup = BeautifulSoup(http.get_html(INDEX_URL), "html.parser")
     year_pages = []
     for a in soup.find_all("a"):
@@ -36,7 +35,8 @@ def list_sources(n_years: int = 5, pref_label: str = PREF_LABEL) -> list[dict]:
             year_pages.append((fy, urljoin(INDEX_URL, a["href"])))
     year_pages.sort(reverse=True)
     out = []
-    for fy, page in year_pages[:n_years]:
+    pages = [yp for yp in year_pages if yp[0] in years] if years else year_pages[:n_years]
+    for fy, page in pages:
         psoup = BeautifulSoup(http.get_html(page), "html.parser")
         anchors = psoup.find_all("a")
         for i, a in enumerate(anchors):
@@ -47,7 +47,7 @@ def list_sources(n_years: int = 5, pref_label: str = PREF_LABEL) -> list[dict]:
                         url = urljoin(page, href)
                         ext = href.rsplit(".", 1)[1]
                         out.append({"fiscal_year": fy, "url": url, "page": page,
-                                    "filename": f"card_{fy}_09.{ext}"})
+                                    "filename": f"card_{fy}_{pref_code}.{ext}", "pref_code": pref_code})
                         break
                 break
     return out
@@ -57,16 +57,16 @@ def download(sources: list[dict], force: bool = False) -> list[http.RawFile]:
     return [http.download(s["url"], SOURCE, s["filename"], force=force) for s in sources]
 
 
-def local_files():
+def local_files(pref_code: str = "09"):
     d = http.raw_dir(SOURCE)
-    return sorted(p for p in d.glob("card_*_09.xls*"))
+    return sorted(p for p in d.glob(f"card_*_{pref_code}.xls*"))
 
 
-def parse(paths) -> list[tuple[P.CardRecord, dict]]:
+def parse(paths, pref_code: str = "09") -> list[tuple[P.CardRecord, dict]]:
     out = []
     for p in paths:
         meta = http.manifest_meta(p) or {"url": None, "retrieved_at": None}
-        for rec in P.parse_workbook(p):
+        for rec in P.parse_workbook(p, pref_code):
             out.append((rec, meta))
     return out
 
@@ -103,10 +103,11 @@ def load(conn: sqlite3.Connection, parsed) -> int:
     return n
 
 
-def run(conn: sqlite3.Connection, n_years: int = 5, offline: bool = False, force: bool = False) -> dict:
+def run(conn: sqlite3.Connection, n_years: int = 5, offline: bool = False, force: bool = False,
+        pref_code: str = "09", years: list[int] | None = None) -> dict:
     if not offline:
         try:
-            srcs = list_sources(n_years)
+            srcs = list_sources(n_years, pref_code, years)
             db.log_fetch(conn, SOURCE, "list", "ok", f"{len(srcs)} files: " + ", ".join(str(s['fiscal_year']) for s in srcs), INDEX_URL)
         except Exception as e:  # noqa: BLE001
             db.log_fetch(conn, SOURCE, "list", "error", repr(e), INDEX_URL)
@@ -117,8 +118,8 @@ def run(conn: sqlite3.Connection, n_years: int = 5, offline: bool = False, force
                 db.log_fetch(conn, SOURCE, "download", "ok", s["filename"], s["url"])
             except Exception as e:  # noqa: BLE001
                 db.log_fetch(conn, SOURCE, "download", "error", repr(e), s["url"])
-    files = local_files()
-    parsed = parse(files)
+    files = local_files(pref_code)
+    parsed = parse(files, pref_code)
     years = sorted({r.fiscal_year for r, _ in parsed})
     codes = {r.code for r, _ in parsed}
     db.log_fetch(conn, SOURCE, "parse", "ok" if parsed else "error",

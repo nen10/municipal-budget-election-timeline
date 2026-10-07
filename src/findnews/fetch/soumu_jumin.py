@@ -16,7 +16,7 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .. import db, http
-from ..municipalities import TOCHIGI
+from ..municipalities import kind, load_masters
 from ..parse import soumu_jumin as P
 
 SOURCE = "soumu_jumin"
@@ -36,7 +36,22 @@ def local_files():
     return sorted(http.raw_dir(SOURCE).glob("jumin_*_shikuchoson.xlsx"))
 
 
-def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False) -> dict:
+def load_master(conn: sqlite3.Connection, path) -> int:
+    """全国の市区町村を municipalities に投入する(他県展開用のマスタ)。"""
+    meta = http.manifest_meta(path) or {"url": None, "retrieved_at": None}
+    n = 0
+    for code, (pref, name) in P.parse_names(path).items():
+        conn.execute(
+            """INSERT INTO municipalities(code, name, pref_code, pref_name, kind, source_url, retrieved_at)
+               VALUES (?,?,?,?,?,?,?) ON CONFLICT(code) DO UPDATE SET name=excluded.name, pref_name=excluded.pref_name""",
+            (code, name, code[:2], pref, kind(name), meta["url"], meta["retrieved_at"]))
+        n += 1
+    conn.commit()
+    load_masters(conn)
+    return n
+
+
+def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False, pref_code: str | None = None) -> dict:
     db.ensure_municipalities(conn)
     if not offline:
         try:
@@ -52,12 +67,15 @@ def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False) ->
         except Exception as e:  # noqa: BLE001
             db.log_fetch(conn, SOURCE, "download", "error", repr(e), INDEX_URL)
     n = 0
+    n_master = 0
     for p in local_files():
+        n_master = load_master(conn, p)
         as_of, pops = P.parse_workbook(p)
         meta = http.manifest_meta(p) or {"url": None, "retrieved_at": None}
         fy = int(as_of[:4]) - 1  # 1 月 1 日現在 → その日を含む年度
-        for code in TOCHIGI:
-            if code in pops:
+        for code in pops:
+            if (pref_code is None or code.startswith(pref_code)) and not code.endswith("0000") and \
+                    conn.execute("SELECT 1 FROM municipalities WHERE code=?", (code,)).fetchone():
                 conn.execute(
                     """INSERT OR REPLACE INTO municipality_fiscal(code, fiscal_year, item, value, unit, source, source_url, retrieved_at)
                        VALUES (?,?,?,?,?,?,?,?)""",
@@ -65,4 +83,4 @@ def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False) ->
                 n += 1
         db.log_fetch(conn, SOURCE, "parse", "ok" if n else "error", f"{p.name}: as_of={as_of} FY{fy} rows={n}", meta["url"])
     conn.commit()
-    return {"rows": n}
+    return {"rows": n, "municipalities_master": n_master}

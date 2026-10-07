@@ -18,7 +18,7 @@ import time
 
 from .. import db, http
 from ..keywords import STATEMENT_KEYWORDS
-from ..municipalities import TOCHIGI, normalize_name
+from ..municipalities import _MASTERS, normalize_name
 
 SOURCE = "kokkai"
 API = "https://kokkai.ndl.go.jp/api/speech"
@@ -73,15 +73,22 @@ def match_keywords(body: str, keywords=None) -> list[str]:
     return [k for k in keywords if normalize_name(k) in b]
 
 
-def target_municipalities(body: str) -> list[str]:
-    """本文中の栃木県内市町名から対象自治体を推定(「那須町」は「那須塩原市」等の誤一致を避けるため除去後に判定)。"""
+def target_municipalities(body: str, pref_codes: list[str] | None = None) -> list[str]:
+    """本文中の市区町村名から対象自治体を推定(読み込み済みのマスタの都道府県。既定は全部)。
+    「那須町」が「那須塩原市」に誤一致しないよう、長い名称から照合して除去していく。
+    他県に同名の市町村がある場合は両方のコードが入る(人が確認すること)。"""
     b = normalize_name(body)
     found = []
-    for code, name in sorted(TOCHIGI.items(), key=lambda kv: -len(kv[1])):
+    by_name: dict[str, list[str]] = {}
+    for p, m in _MASTERS.items():
+        if pref_codes is None or p in pref_codes:
+            for c, n in m.items():
+                by_name.setdefault(n, []).append(c)
+    for name in sorted(by_name, key=len, reverse=True):
         if name in b:
-            found.append(code)
-            b = b.replace(name, "")
-    return sorted(found)
+            found.extend(by_name[name])
+            b = b.replace(name, "\0")
+    return sorted(set(found))
 
 
 def parse(paths) -> list[dict]:

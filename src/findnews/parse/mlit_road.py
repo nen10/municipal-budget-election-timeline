@@ -61,14 +61,14 @@ def road_pages(pdf) -> list[int]:
     return list(range(start + 1, len(pdf.pages))) if start is not None else []
 
 
-def _codes(text: str) -> list[str]:
+def _codes(text: str, pref_code: str = "09") -> list[str]:
     parts = re.split(r"[、,～~]", norm(text))
-    return sorted({c for c in (lookup(x) for x in parts if x) if c})
+    return sorted({c for c in (lookup(x, pref_code) for x in parts if x) if c})
 
 
-def _entity_row(table, work, item, entity, location, amount, page, route=None) -> RoadRow:
+def _entity_row(table, work, item, entity, location, amount, page, route=None, pref_code="09") -> RoadRow:
     ent = normalize_name(entity)
-    code = lookup(ent)
+    code = lookup(ent, pref_code)
     if code:
         attr = "sole"
     elif ent.endswith(("県", "都", "道", "府")):
@@ -81,7 +81,7 @@ def _entity_row(table, work, item, entity, location, amount, page, route=None) -
                    to_number(amount), page)
 
 
-def parse_page(page, page_no: int) -> list[RoadRow]:
+def parse_page(page, page_no: int, pref_code: str = "09") -> list[RoadRow]:
     text = norm(page.extract_text() or "")
     direct = "種別:直轄事業" in text
     out: list[RoadRow] = []
@@ -97,7 +97,7 @@ def parse_page(page, page_no: int) -> list[RoadRow]:
             if hdr[0] == "事業主体名":
                 break  # E: 構造物一覧
             if hdr[0] == "地域再生計画の名称":
-                codes = _codes(cells[1])
+                codes = _codes(cells[1], pref_code)
                 attr = "sole" if len(codes) == 1 else ("joint" if codes else "unknown")
                 out.append(RoadRow("D", "地域再生計画", norm(cells[0]), None, norm(cells[1]), None,
                                    codes[0] if len(codes) == 1 else None, attr,
@@ -105,7 +105,7 @@ def parse_page(page, page_no: int) -> list[RoadRow]:
                                    to_number(cells[2]), page_no, codes))
             elif hdr[1] == "路線名":
                 route, loc = norm(cells[1]), norm(cells[2])
-                codes = _codes(loc)
+                codes = _codes(loc, pref_code)
                 if direct:
                     out.append(RoadRow("A_direct", norm(cells[0]), norm(cells[3]), route, loc, "国", None, "national",
                                        "direct", to_number(cells[4]), page_no, codes))
@@ -116,17 +116,17 @@ def parse_page(page, page_no: int) -> list[RoadRow]:
                     out.append(RoadRow("A_subsidy", norm(cells[0]), norm(cells[3]), route, loc, None, None, "unknown",
                                        "none", to_number(cells[4]), page_no, codes))
             elif hdr[1] == "事業主体":
-                out.append(_entity_row("B", cells[0], cells[2], cells[1], None, cells[3], page_no))
+                out.append(_entity_row("B", cells[0], cells[2], cells[1], None, cells[3], page_no, pref_code=pref_code))
             elif hdr[1] == "市町村名" and len(hdr) > 3 and hdr[3] == "事業主体":
-                r = _entity_row("C", cells[0], cells[2], cells[3], norm(cells[1]), cells[4], page_no)
-                r.location_codes = _codes(cells[1])
+                r = _entity_row("C", cells[0], cells[2], cells[3], norm(cells[1]), cells[4], page_no, pref_code=pref_code)
+                r.location_codes = _codes(cells[1], pref_code)
                 out.append(r)
     return out
 
 
-def parse_pdf(path: str | Path) -> list[RoadRow]:
+def parse_pdf(path: str | Path, pref_code: str = "09") -> list[RoadRow]:
     rows: list[RoadRow] = []
     with pdfplumber.open(path) as pdf:
         for i in road_pages(pdf):
-            rows.extend(parse_page(pdf.pages[i], i + 1))
+            rows.extend(parse_page(pdf.pages[i], i + 1, pref_code))
     return rows

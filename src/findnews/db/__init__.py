@@ -11,7 +11,7 @@ from .. import config
 TABLES = [
     "municipalities", "municipality_fiscal", "politicians", "positions", "elections",
     "election_results", "endorsements", "subsidy_programs", "subsidy_allocations",
-    "requests", "statements", "cases", "signals", "fetch_log",
+    "requests", "statements", "cases", "signals", "fetch_log", "observations", "events",
 ]
 
 

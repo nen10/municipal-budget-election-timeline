@@ -17,6 +17,7 @@ from pathlib import Path
 import pdfplumber
 
 from ..municipalities import lookup, normalize_name
+from ..prefs import name as pref_name_of
 from .common import norm, to_number
 
 _SUBHEAD = re.compile(r"^(社会資本整備総合交付金|防災・安全交付金)\s*（単位")
@@ -37,12 +38,13 @@ class GrantRow:
     municipality_code: str | None = None
 
 
-def classify(recipients: list[str], pref_name: str = "栃木県") -> tuple[str, str | None, list[str], list[str]]:
+def classify(recipients: list[str], pref_code: str = "09") -> tuple[str, str | None, list[str], list[str]]:
+    pref_name = pref_name_of(pref_code)
     codes, unresolved = [], []
     for r in recipients:
         if r == pref_name:
             continue
-        c = lookup(r)
+        c = lookup(r, pref_code)
         (codes.append(c) if c else unresolved.append(r))
     munis = sorted(set(codes))
     if not munis and not unresolved:
@@ -67,7 +69,7 @@ def grant_totals(page) -> tuple[str | None, float | None]:
     return program, None
 
 
-def parse_grant_page(page, page_no: int, pref_name: str = "栃木県") -> list[GrantRow]:
+def parse_grant_page(page, page_no: int, pref_code: str = "09") -> list[GrantRow]:
     text = page.extract_text() or ""
     program = None
     for line in text.splitlines()[:6]:
@@ -88,20 +90,20 @@ def parse_grant_page(page, page_no: int, pref_name: str = "栃木県") -> list[G
             if not norm(who):
                 continue
             recips = [normalize_name(x) for x in norm(who).split(",") if x]
-            attribution, code, codes, unresolved = classify(recips, pref_name)
+            attribution, code, codes, unresolved = classify(recips, pref_code)
             out.append(GrantRow(program, norm(name), recips, codes, unresolved, to_number(amount), page_no,
                                 attribution, code))
     return out
 
 
-def parse_pdf(path: str | Path, pref_name: str = "栃木県") -> dict:
+def parse_pdf(path: str | Path, pref_code: str = "09") -> dict:
     grants: list[GrantRow] = []
     totals: dict[str, float] = {}
     with pdfplumber.open(path) as pdf:
         for i, p in enumerate(pdf.pages, 1):
             text = p.extract_text() or ""
             if "計画策定主体" in text:
-                grants.extend(parse_grant_page(p, i, pref_name))
+                grants.extend(parse_grant_page(p, i, pref_code))
                 prog, tot = grant_totals(p)
                 if prog and tot is not None:
                     totals[prog] = tot

@@ -1,4 +1,4 @@
-"""総務省 報道発表「特別交付税(12 月分・3 月分)交付額の決定」の取得(栃木県分)。
+"""総務省 報道発表「特別交付税(12 月分・3 月分)交付額の決定」の取得(都道府県コードを引数に取る。既定は栃木県 09)。
 
 URL 一覧の作り方:
   月別報道資料一覧 https://www.soumu.go.jp/menu_news/s-news/{YYMM}m.html
@@ -22,13 +22,13 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .. import db, http
-from ..municipalities import TOCHIGI, stem
+from ..municipalities import master, stem
+from ..prefs import short as pref_short
 from ..parse import soumu_tokko as P
 
 SOURCE = "soumu_tokko"
 PROGRAM_ID = "soumu_tokko"
 ARCHIVE = "https://www.soumu.go.jp/menu_news/s-news/{yymm}m.html"
-PREF_LABEL = "栃木"
 
 
 def _reiwa(fy: int) -> str:
@@ -66,20 +66,22 @@ def local_files():
     return sorted(http.raw_dir(SOURCE).glob("tokko_*.pdf"))
 
 
-def parse(paths) -> list[dict]:
-    stems = {stem(n): c for c, n in TOCHIGI.items() if n.endswith("市")}
+def parse(paths, pref_code: str = "09") -> list[dict]:
+    m = master(pref_code)
+    stems = {stem(n): c for c, n in m.items() if n.endswith("市")}
     out = []
     for p in paths:
         meta = http.manifest_meta(p) or {"url": None, "retrieved_at": None}
         d = P.parse_pdf(p)
-        found, warnings = P.select_pref(d["records"], PREF_LABEL, stems)
+        found, warnings = P.select_pref(d["records"], pref_short(pref_code), stems)
         out.append({"path": p, "meta": meta, "fiscal_year": d["fiscal_year"], "kind": d["kind"],
                     "decision_date": d["decision_date"], "found": found, "warnings": warnings,
                     "missing": sorted(set(stems.values()) - set(found))})
     return out
 
 
-def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
+def load(conn: sqlite3.Connection, parsed: list[dict], pref_code: str = "09") -> int:
+    names = master(pref_code)
     conn.execute(
         """INSERT OR IGNORE INTO subsidy_programs(program_id, name, ministry, results_public, granularity, note, source_url)
            VALUES (?,?,?,?,?,?,?)""",
@@ -88,7 +90,8 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     )
     n = 0
     for d in parsed:
-        conn.execute("DELETE FROM subsidy_allocations WHERE program_id=? AND fiscal_year=? AND source_url=?",
+        conn.execute("DELETE FROM subsidy_allocations WHERE program_id=? AND fiscal_year=? AND source_url IS ? "
+                     f"AND municipality_code LIKE '{pref_code}%'",
                      (PROGRAM_ID, d["fiscal_year"], d["meta"]["url"]))
         for code, r in d["found"].items():
             if d["kind"] == "12月":
@@ -100,7 +103,7 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
                     """INSERT INTO subsidy_allocations(program_id, municipality_code, fiscal_year, item_name, recipients,
                        recipient_codes, attribution, amount_thousand_yen, unit_original, decision_date, raw_ref,
                        source_url, retrieved_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-                    (PROGRAM_ID, code, d["fiscal_year"], item, TOCHIGI[code], code, "sole", amt, "千円",
+                    (PROGRAM_ID, code, d["fiscal_year"], item, names[code], code, "sole", amt, "千円",
                      d["decision_date"], f"p.{r.page}", d["meta"]["url"], d["meta"]["retrieved_at"]),
                 )
                 n += 1
@@ -108,7 +111,8 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     return n
 
 
-def run(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, offline: bool = False, force: bool = False) -> dict:
+def run(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, offline: bool = False, force: bool = False,
+        pref_code: str = "09") -> dict:
     fiscal_years = fiscal_years or list(range(2020, 2026))
     if not offline:
         srcs = list_sources(fiscal_years)
@@ -121,14 +125,14 @@ def run(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, offline
                 db.log_fetch(conn, SOURCE, "download", "ok", s["filename"], s["url"])
             except Exception as e:  # noqa: BLE001
                 db.log_fetch(conn, SOURCE, "download", "error", repr(e), s["url"])
-    parsed = parse(local_files())
+    parsed = parse(local_files(), pref_code)
     for d in parsed:
         status = "ok" if d["found"] else "error"
         db.log_fetch(conn, SOURCE, "parse", status,
                      f"{d['path'].name}: FY{d['fiscal_year']} {d['kind']} cities={len(d['found'])} "
                      f"missing={d['missing']} warnings={d['warnings']} (町は報道資料に個別額なし)",
                      d["meta"]["url"])
-    n = load(conn, parsed)
+    n = load(conn, parsed, pref_code)
     db.log_fetch(conn, SOURCE, "load", "ok", f"{n} rows")
     return {"files": len(parsed), "rows": n,
             "by_file": {d["path"].name: (d["fiscal_year"], d["kind"], len(d["found"])) for d in parsed}}

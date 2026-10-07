@@ -28,11 +28,10 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 
 from .. import db, http
-from ..municipalities import TOCHIGI
 from ..parse import mlit_kasho as P
+from ..prefs import short as pref_short
 
 SOURCE = "mlit_grants"
-PREF_LINK_TEXT = "栃木"
 
 # fiscal_year -> (報道発表ページ, 発表日(報道発表ページ本文で確認), 事業実施箇所ページ)
 RELEASES: dict[int, tuple[str, str | None, str]] = {
@@ -66,7 +65,8 @@ def discover_releases(start: int, stop: int) -> list[tuple[int, str, str]]:
     return out
 
 
-def list_sources(fiscal_years: list[int]) -> list[dict]:
+def list_sources(fiscal_years: list[int], pref_code: str = "09") -> list[dict]:
+    link_text = pref_short(pref_code)
     out = []
     for fy in fiscal_years:
         if fy not in RELEASES:
@@ -74,25 +74,25 @@ def list_sources(fiscal_years: list[int]) -> list[dict]:
             continue
         press, date, kasho = RELEASES[fy]
         soup = BeautifulSoup(http.get_html(kasho), "html.parser")
-        link = next((a["href"] for a in soup.find_all("a") if a.get_text(strip=True) == PREF_LINK_TEXT), None)
+        link = next((a["href"] for a in soup.find_all("a") if a.get_text(strip=True) == link_text), None)
         if not link:
-            out.append({"fiscal_year": fy, "url": None, "error": f"{PREF_LINK_TEXT} のリンクなし: {kasho}"})
+            out.append({"fiscal_year": fy, "url": None, "error": f"{link_text} のリンクなし: {kasho}"})
             continue
         out.append({"fiscal_year": fy, "url": urljoin(kasho, link), "press": press, "date": date,
-                    "filename": f"kasho_{fy}_09.pdf"})
+                    "filename": f"kasho_{fy}_{pref_code}.pdf"})
     return out
 
 
-def local_files():
-    return sorted(http.raw_dir(SOURCE).glob("kasho_*_09.pdf"))
+def local_files(pref_code: str = "09"):
+    return sorted(http.raw_dir(SOURCE).glob(f"kasho_*_{pref_code}.pdf"))
 
 
-def parse(paths) -> list[dict]:
+def parse(paths, pref_code: str = "09") -> list[dict]:
     out = []
     for p in paths:
         fy = int(re.search(r"kasho_(\d{4})_", p.name).group(1))
         meta = http.manifest_meta(p) or {"url": None, "retrieved_at": None}
-        d = P.parse_pdf(p)
+        d = P.parse_pdf(p, pref_code)
         d.update({"path": p, "fiscal_year": fy, "meta": meta,
                   "decision_date": RELEASES.get(fy, (None, None, None))[1]})
         out.append(d)
@@ -110,7 +110,8 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     n = 0
     for d in parsed:
         url, ra = d["meta"]["url"], d["meta"]["retrieved_at"]
-        conn.execute("DELETE FROM subsidy_allocations WHERE fiscal_year=? AND program_id IN ('mlit_shasoukou','mlit_bouan')", (d["fiscal_year"],))
+        conn.execute("""DELETE FROM subsidy_allocations WHERE fiscal_year=? AND program_id IN ('mlit_shasoukou','mlit_bouan')
+                        AND source_url IS ?""", (d["fiscal_year"], url))
         for g in d["grants"]:
             conn.execute(
                 """INSERT INTO subsidy_allocations(program_id, municipality_code, fiscal_year, item_name, recipients,
@@ -125,9 +126,10 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     return n
 
 
-def run_download(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, force: bool = False) -> None:
+def run_download(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, force: bool = False,
+                 pref_code: str = "09") -> None:
     fiscal_years = fiscal_years or sorted(RELEASES)
-    for s in list_sources(fiscal_years):
+    for s in list_sources(fiscal_years, pref_code):
         if not s.get("url"):
             db.log_fetch(conn, SOURCE, "list", "error", f"FY{s['fiscal_year']}: {s['error']}")
             continue
@@ -138,10 +140,11 @@ def run_download(conn: sqlite3.Connection, fiscal_years: list[int] | None = None
             db.log_fetch(conn, SOURCE, "download", "error", repr(e), s["url"])
 
 
-def run(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, offline: bool = False, force: bool = False) -> dict:
+def run(conn: sqlite3.Connection, fiscal_years: list[int] | None = None, offline: bool = False, force: bool = False,
+        pref_code: str = "09") -> dict:
     if not offline:
-        run_download(conn, fiscal_years, force)
-    parsed = parse(local_files())
+        run_download(conn, fiscal_years, force, pref_code)
+    parsed = parse(local_files(pref_code), pref_code)
     for d in parsed:
         ok = d["grants"] and all(abs(v) < 0.5 for v in d["total_check"].values())
         db.log_fetch(conn, SOURCE, "parse", "ok" if ok else "error",

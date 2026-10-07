@@ -1,4 +1,4 @@
-"""国交省 道路局の年度当初配分「箇所表」(栃木県分)の取得。
+"""国交省 道路局の年度当初配分「箇所表」(都道府県別。既定は栃木県 09)の取得。
 
 出典は fetch/mlit_grants.py と同じ「国土交通省関係予算の配分について」→「事業実施箇所」→ 都道府県別 PDF の
 先頭にある道路局セクション(「令和N年度 箇所表」)。依頼文の「道路関係予算 配分」の都道府県別箇所表に相当する。
@@ -20,7 +20,7 @@ import re
 import sqlite3
 
 from .. import db, http
-from ..municipalities import TOCHIGI
+from ..municipalities import master
 from ..parse import mlit_road as P
 from . import mlit_grants
 
@@ -28,15 +28,15 @@ SOURCE = "mlit_road"
 PROGRAM_ID = "mlit_road"
 
 
-def local_files():
-    return mlit_grants.local_files()
+def local_files(pref_code: str = "09"):
+    return mlit_grants.local_files(pref_code)
 
 
-def parse(paths) -> list[dict]:
+def parse(paths, pref_code: str = "09") -> list[dict]:
     out = []
     for p in paths:
         fy = int(re.search(r"kasho_(\d{4})_", p.name).group(1))
-        out.append({"path": p, "fiscal_year": fy, "rows": P.parse_pdf(p),
+        out.append({"path": p, "fiscal_year": fy, "rows": P.parse_pdf(p, pref_code),
                     "meta": http.manifest_meta(p) or {"url": None, "retrieved_at": None},
                     "decision_date": mlit_grants.RELEASES.get(fy, (None, None, None))[1]})
     return out
@@ -52,7 +52,8 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     n = 0
     for d in parsed:
         url, ra = d["meta"]["url"], d["meta"]["retrieved_at"]
-        conn.execute("DELETE FROM subsidy_allocations WHERE program_id=? AND fiscal_year=?", (PROGRAM_ID, d["fiscal_year"]))
+        conn.execute("DELETE FROM subsidy_allocations WHERE program_id=? AND fiscal_year=? AND source_url IS ?",
+                     (PROGRAM_ID, d["fiscal_year"], url))
         for r in d["rows"]:
             amt = r.amount_million_yen * 1000 if r.amount_million_yen is not None else None
             recips = r.entity or r.location or ""
@@ -70,10 +71,11 @@ def load(conn: sqlite3.Connection, parsed: list[dict]) -> int:
     return n
 
 
-def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False) -> dict:
+def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False, pref_code: str = "09",
+        fiscal_years: list[int] | None = None) -> dict:
     if not offline:
-        mlit_grants.run_download(conn, None, force)
-    parsed = parse(local_files())
+        mlit_grants.run_download(conn, fiscal_years, force, pref_code)
+    parsed = parse(local_files(pref_code), pref_code)
     for d in parsed:
         sole = sum(1 for r in d["rows"] if r.attribution == "sole")
         db.log_fetch(conn, SOURCE, "parse", "ok" if d["rows"] else "error",
@@ -82,5 +84,4 @@ def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False) ->
     n = load(conn, parsed)
     db.log_fetch(conn, SOURCE, "load", "ok", f"{n} rows")
     return {"files": len(parsed), "rows": n, "years": [d["fiscal_year"] for d in parsed],
-            "targets": {TOCHIGI[c]: sum(1 for d in parsed for r in d["rows"] if r.municipality_code == c)
-                        for c in ("092151", "094111")}}
+            "sole_rows": sum(1 for d in parsed for r in d["rows"] if r.attribution == "sole")}
