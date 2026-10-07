@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% import "macros.html" as mc %}
+{% block title %}マトリックス {{ group.id }}{% endblock %}
+{% macro a1_entry(p) -%}
+<a href="../municipalities/{{ p.code }}.html">{{ p.name }}</a><span class="small">(首長: {{ p.mayor_name or '未収集' }} / 支持: {% for c in p.a1_cands %}{{ c.name }}({{ c.nomination or c.party }}){% if not loop.last %}、{% endif %}{% else %}—{% endfor %})</span>
+{%- endmacro %}
+{% macro a2_entry(p) -%}
+<a href="../municipalities/{{ p.code }}.html">{{ p.name }}</a><span class="small">(1位 {{ p.top1.name }}({{ p.top1.nomination or p.top1.party }}){{ '%.1f'|format(p.top1_share * 100) }}%{% if p.top2 %} / 2位 {{ p.top2.name }}({{ p.top2.nomination or p.top2.party }}){{ '%.1f'|format(p.top2_share * 100) }}% / 差 {{ '%.1f'|format(p.gap_pt) }}pt{% endif %})</span>
+{%- endmacro %}
+{% macro table(parts, attr, entry, bd, caption, order=None) -%}
+{% set present = parts|map(attribute=attr)|unique|list %}
+{% set cats = order if order else ((present|reject('equalto', '未収集')|list|sort) + (['未収集'] if '未収集' in present else [])) %}
+<div class="table-wrap">
+<table>
+  <caption>{{ caption }}</caption>
+  <thead><tr><th scope="col">行(軸 A)</th><th scope="col" class="num">計</th>{% for b in B_ORDER %}<th scope="col" class="{{ dir_class(b) }}">{{ b }}</th>{% endfor %}<th scope="col" class="num">減少の割合(全件中)</th><th scope="col" class="num">減少の割合(未取得を除く)</th></tr></thead>
+  <tbody>
+  {% for cat in cats %}
+    {% set ps = parts|selectattr(attr, 'equalto', cat)|list %}
+    {% set n_dec = ps|selectattr('code', 'in', bd['減少'])|list|length %}
+    {% set n_obs = ps|rejectattr('code', 'in', bd['未取得'])|list|length %}
+    <tr><th scope="row">{{ cat }}</th><td class="num">{{ ps|length }}</td>
+      {% for b in B_ORDER %}
+        {% set sel = ps|selectattr('code', 'in', bd[b])|list %}
+        <td class="wrap"><span class="{{ dir_class(b) }}">{{ sel|length }}</span>{% if sel %}<ul class="cell-list">{% for p in sel %}<li>{{ entry(p) }}</li>{% endfor %}</ul>{% endif %}</td>
+      {% endfor %}
+      <td class="num">{{ n_dec }}/{{ ps|length }}{% if ps %} = {{ (100 * n_dec / ps|length)|round|int }}%{% endif %}</td>
+      <td class="num">{{ n_dec }}/{{ n_obs }}{% if n_obs %} = {{ (100 * n_dec / n_obs)|round|int }}%{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{%- endmacro %}
+{% block body %}
+{% set n_unc = m.parts|selectattr('a1_status', 'equalto', '未収集')|list|length %}
+<p class="kicker"><a href="../index.html">{{ pref_name }}</a> / 国政選挙との分離マトリックス</p>
+<h1>{{ group.date }} 衆院選:首長の支持・自治体内の得票と、投票日後最初の差分の方向</h1>
+<p class="lead">{{ group.date }} に投票があった衆院選({{ pref_name }}内 {{ group.districts }} 選挙区)について、各市町を首長の支持表明(A1)と自治体内の得票結果(A2)で分け、投票日の直後に最初に決まった値の直前比の方向(B)と掛け合わせた。件数と割合は記述統計で、有意性や因果を示すものではない。</p>
+<p class="byline">行 = 自治体(複数の選挙区にまたがる自治体は選挙区ごとに 1 行)。選挙 ID {{ group.id }}。</p>
+
+<section class="points" aria-labelledby="pts">
+<h2 id="pts">要点</h2>
+<ul>
+  <li><strong>首長の支持表明(A1)未収集: {{ n_unc }} / {{ m.parts|length }} 行。</strong>未収集は「中立・非表明」に含めず別区分にしている。</li>
+  <li>使った観測時点の decided_date: {% for k, lab in B_KEYS %}{{ lab }} {{ m.firsts[k]|join(', ') or '該当なし' }}{% if not loop.last %}、{% endif %}{% endfor %}。</li>
+  {% for dist, di in m.info|dictsort %}
+  <li>{{ di.label }}: 選挙区当選 {% if di.winner %}{{ di.winner.name }}({{ di.winner.nomination or di.winner.party }}){% else %}—{% endif %}{% for r in di.revived %}、落選・比例復活 {{ r.name }}({{ r.nomination or r.party }}){% endfor %}。</li>
+  {% endfor %}
+</ul>
+</section>
+
+<h2 id="a3">A3 選挙区の当選者・比例復活者と選挙後の役職</h2>
+<div class="table-wrap">
+<table>
+  <caption>選挙区ごとの当選者・比例復活者と、positions.csv に出典つきで登録された選挙後の役職</caption>
+  <thead><tr><th scope="col">選挙区</th><th scope="col">結果</th><th scope="col">氏名(政党)</th><th scope="col">選挙後の役職(就任日、所管、指標 3〜5 の所管との一致)</th></tr></thead>
+  <tbody>
+  {% for dist, di in m.info|dictsort %}
+    {% if di.winner %}<tr><th scope="row">{{ di.label }}</th><td>選挙区当選</td><td>{{ di.winner.name }}({{ di.winner.nomination or di.winner.party }})</td><td class="wrap">{{ a3(di.winner) }}</td></tr>{% endif %}
+    {% for r in di.revived %}<tr><th scope="row">{{ di.label }}</th><td>落選・比例復活</td><td>{{ r.name }}({{ r.nomination or r.party }})</td><td class="wrap">{{ a3(r) }}</td></tr>{% endfor %}
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="source-note">出典: 選挙区の結果は都道府県選管の開票結果、比例復活は data/manual/election_outcomes.csv の出典、役職は positions.csv の出典(首相官邸の閣僚等名簿)。</p>
+
+{% for k, lab in B_KEYS %}
+{% set dirs = m.by_dir[k] %}
+<h2 id="{{ k }}">{{ lab }}</h2>
+<h3>A1 × B:支持候補の政党・結果(全選挙区)</h3>
+{{ table(m.parts, 'a1_heading', a1_entry, dirs, lab ~ ' / A1 × B(全選挙区)') }}
+<h3>A2 × B:自治体内 1 位候補の政党・結果(全選挙区)</h3>
+{{ table(m.parts, 'a2_heading', a2_entry, dirs, lab ~ ' / A2 × B(全選挙区)') }}
+<h3>選挙区別</h3>
+{% for dist, di in m.info|dictsort %}
+{% set ps = m.parts|selectattr('district', 'equalto', dist)|list %}
+<p class="small"><strong>{{ di.label }}</strong>: 当選 {% if di.winner %}{{ di.winner.name }}({{ di.winner.nomination or di.winner.party }})[{{ a3(di.winner) }}]{% endif %}{% for r in di.revived %} / 比例復活 {{ r.name }}({{ r.nomination or r.party }})[{{ a3(r) }}]{% endfor %}</p>
+{{ table(ps, 'a1_heading', a1_entry, dirs, lab ~ ' / ' ~ di.label ~ ' / A1 × B') }}
+{{ table(ps, 'a2_heading', a2_entry, dirs, lab ~ ' / ' ~ di.label ~ ' / A2 × B') }}
+{% endfor %}
+<h3>補助:勝者・敗者の派生区分</h3>
+{{ table(m.parts, 'a1_derived', a1_entry, dirs, lab ~ ' / A1(派生区分)× B', DERIVED_A1) }}
+{{ table(m.parts, 'a2_derived', a2_entry, dirs, lab ~ ' / A2(派生区分)× B', DERIVED_A2) }}
+<p class="source-note">出典: 方向は各自治体ページの指標表(国交省・総務省の公表資料)。首長の支持は下の A1 の出典。</p>
+{% endfor %}
+
+<h2 id="a1src">A1 の出典(引用は原文)</h2>
+<ul>
+{% for p in m.parts if p.a1_sources %}{% for s in p.a1_sources %}
+  <li><a href="../municipalities/{{ p.code }}.html">{{ p.name }}</a>: {{ s[1] }} {{ s[2] }} <span class="quote">{{ s[3] }}</span> <a href="{{ s[0] }}">{{ s[0] }}</a></li>
+{% endfor %}{% else %}<li>出典つきの登録なし</li>{% endfor %}
+</ul>
+{% endblock %}

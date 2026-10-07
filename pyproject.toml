@@ -17,6 +17,7 @@ dependencies = [
   "pandas>=2.1",
   "pyyaml>=6.0",
   "click>=8.1",
+  "jinja2>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -29,7 +30,7 @@ findnews = "findnews.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-findnews = ["db/schema.sql"]
+findnews = ["db/schema.sql", "site/templates/*.html", "site/static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

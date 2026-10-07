@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% import "macros.html" as mc %}
+{% block title %}{{ name }}{% endblock %}
+{% block body %}
+<p class="kicker"><a href="../index.html">{{ pref_name }}</a> / 自治体 {{ code }}</p>
+<h1>{{ name }}:補助金・交付金の直前比と同じ期間の政局イベント</h1>
+<p class="lead">{{ pref_name }}{{ name }}について、公開資料から取得した交付金・補助金・決算の値を観測時点ごとに並べ、直前の観測時点との差分を示す。各差分の「対応期間」に日付が重なるイベントを並べているが、これは日付による機械的な対応で、両者の関係を示すものではない。</p>
+<p class="byline">観測時点の定義・方向の閾値は<a href="../about.html">方法と用語</a>を参照。</p>
+
+<section class="points" aria-labelledby="pts">
+<h2 id="pts">要点</h2>
+<ul>{% for p in points %}<li>{{ p }}</li>{% endfor %}</ul>
+</section>
+
+<nav class="small" aria-label="このページの目次">
+{% for b in blocks %}<a href="#{{ b.id }}">指標 {{ b.no }}</a> · {% endfor %}<a href="#items">事業別</a> · <a href="#events">関係イベント</a>
+</nav>
+
+{% for b in blocks %}
+<h2 id="{{ b.id }}">指標 {{ b.no }} {{ b.label }}</h2>
+{% if b.ministry %}<p class="small">所管: {{ b.ministry }}。decided_date の根拠: {{ b.basis|join('、') }}。</p>{% else %}<p class="small">decided_date の根拠: {{ b.basis|join('、') }}。</p>{% endif %}
+{% if b.svg %}
+<figure class="chart">
+  {{ mc.legend() }}
+  {{ b.svg|safe }}
+  <figcaption>図: {{ name }} 指標 {{ b.no }} {{ b.label }}(千円)。横軸は decided_date。点の色はその観測時点の直前比の方向。
+  灰色の縦線はこの自治体に関係するイベント(予算配分公表は観測時点と同じ日付のため線を省き、下の表にのみ記載)。同じ内容を下の表に示す。</figcaption>
+</figure>
+{% if b.drawn %}
+<div class="table-wrap" style="max-height:none">
+<table>
+  <caption>図中の縦線の番号とイベント</caption>
+  <thead><tr><th scope="col" class="num">番号</th><th scope="col">日付</th><th scope="col">種別</th><th scope="col">当事者(政党、役職)</th><th scope="col">内容</th></tr></thead>
+  <tbody>{% for e in b.drawn %}<tr><td class="num">{{ e.n }}</td><td class="date">{{ e.date }}{% if e.end_date %}〜{{ e.end_date }}{% endif %}</td><td>{{ e.event_type }}</td><td>{{ mc.event_who(e) }}</td><td class="wrap">{{ e.summary }}</td></tr>{% endfor %}</tbody>
+</table>
+</div>
+{% endif %}
+{% else %}
+<p class="flat">値が取得できていないため図はない。</p>
+{% endif %}
+<div class="table-wrap">
+<table>
+  <caption>{{ name }} 指標 {{ b.no }} {{ b.label }}:観測時点ごとの値と直前比(単位: 千円)</caption>
+  <thead><tr>
+    <th scope="col">対象期間</th><th scope="col">decided_date</th><th scope="col">公表日</th>
+    <th scope="col" class="num">値(千円)</th>{% if b.id.startswith('mlit') %}<th scope="col" class="num">件数</th>{% endif %}
+    <th scope="col" class="num">直前比 差額(千円)</th><th scope="col">方向</th><th scope="col">対応期間</th><th scope="col">対応期間内のイベント</th>
+  </tr></thead>
+  <tbody>
+  {% for r in b.rows %}
+    <tr>
+      <th scope="row" class="date">{{ r.period_start }}〜{{ r.period_end }}</th>
+      <td class="date">{{ r.decided_date or '—' }}{% if r.decided_date_is_proxy %}(代用){% endif %}</td>
+      <td class="date">{{ r.published_date or '未収集' }}</td>
+      <td class="num">{% if r.value is not none %}{{ r.value|num }}{% else %}<span class="flat">未取得</span><br><span class="small">{{ r.missing_reason }}</span>{% endif %}</td>
+      {% if b.id.startswith('mlit') %}<td class="num">{{ r.count if r.count is not none else '' }}</td>{% endif %}
+      <td class="num {{ dir_class(r.direction) }}">{% if r.delta is not none %}{{ r.delta|num }}{% else %}—{% endif %}</td>
+      {% if r.window_start %}{{ mc.dircell(r.direction, r.delta_pct) }}{% else %}<td class="dir flat">—(最初の観測時点)</td>{% endif %}
+      <td class="date">{% if r.window_start %}{{ r.window_start }}〜{{ r.window_end }}{% else %}—{% endif %}</td>
+      <td class="wrap">{% if r.event_ids %}<ul class="cell-list">{% for i in r.event_ids %}{% set e = evmap[i] %}<li>{{ e.date }} {{ e.event_type }}: {{ mc.event_who(e) }}{% if e.counterpart_name %} → {{ mc.event_counterpart(e) }}{% endif %}</li>{% endfor %}</ul>{% else %}—{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ mc.sources(b.sources) }}
+{% endfor %}
+
+<h2 id="items">事業別の一覧(指標 4・5、前年度との事業名突合)</h2>
+<p>継続(増額)・継続(減額)・継続(同額)・新規・消滅に分類。名称の期替わり(第三期→第四期など)は備考に記す。</p>
+{% if items %}
+<div class="table-wrap">
+<table>
+  <caption>{{ name }} 指標 4・5 の事業別の前年度比(単位: 千円)</caption>
+  <thead><tr><th scope="col" data-sort>指標</th><th scope="col" data-sort>年度</th><th scope="col" data-sort>事業名</th><th scope="col" class="num" data-sort>前年度額(千円)</th><th scope="col" class="num" data-sort>当年度額(千円)</th><th scope="col" data-sort>分類</th><th scope="col">備考</th></tr></thead>
+  <tbody>
+  {% for it in items %}
+    {% set cls = 'up' if it['class'] == '継続(増額)' or it['class'] == '新規' else ('down' if it['class'] in ('継続(減額)', '消滅') else 'flat') %}
+    <tr><td>{{ it.indicator }}</td><td class="date">{{ it.fiscal_year }}</td><th scope="row">{{ it.item }}</th>
+      <td class="num" data-value="{{ it.prev if it.prev is not none else '' }}">{{ it.prev|num if it.prev is not none else '—' }}</td>
+      <td class="num" data-value="{{ it.cur if it.cur is not none else '' }}">{{ it.cur|num if it.cur is not none else '—' }}</td>
+      <td class="{{ cls }}">{{ it['class'] }}</td><td class="small">{{ it.note }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{{ mc.sources(item_sources) }}
+{% else %}<p class="flat">該当なし(単独の計画・事業主体の箇所が両年度にない)。</p>{% endif %}
+
+<h2 id="events">この自治体に関係するイベント(日付順)</h2>
+<p>範囲が全国・都道府県・選挙区・当該自治体のイベント。引用は出典の原文。</p>
+<div class="table-wrap">
+<table>
+  <caption>{{ name }} に関係する政局イベント {{ events|length }} 件</caption>
+  <thead><tr><th scope="col">日付</th><th scope="col">種別</th><th scope="col">範囲</th><th scope="col">当事者(政党、役職)</th><th scope="col">相手方(役職)</th><th scope="col">内容</th><th scope="col">引用</th><th scope="col">出典</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr><td class="date">{{ e.date }}{% if e.end_date %}〜{{ e.end_date }}{% endif %}</td><td>{{ e.event_type }}</td><td>{{ e.scope }}</td>
+      <th scope="row">{{ mc.event_who(e) }}</th><td>{{ mc.event_counterpart(e) }}</td><td class="wrap">{{ e.summary }}{% if e.note %}<br><span class="small">{{ e.note }}</span>{% endif %}</td>
+      <td class="wrap">{% if e.quote %}<span class="quote">{{ e.quote }}</span>{% else %}—{% endif %}</td>
+      <td class="wrap small">{{ e.outlet or '' }} {{ e.source_date or '' }}<br>{% if e.source_url %}<a href="{{ e.source_url }}">{{ e.source_url }}</a>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="source-note">出典: 各行の右端の URL。</p>
+{% endblock %}

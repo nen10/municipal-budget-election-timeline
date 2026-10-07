@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% import "macros.html" as mc %}
+{% block title %}概要{% endblock %}
+{% block body %}
+<p class="kicker">{{ pref_name }} / 補助金・交付金の時系列と政局イベント</p>
+<h1>{{ pref_name }}の {{ munis|length }} 市町、補助金・交付金の直前比と政局イベントの記録</h1>
+<p class="lead">{{ pref_name }}内の {{ munis|length }} 市町について、総務省と国土交通省の公表資料から取得した交付金・補助金・決算の値を観測時点ごとに並べ、直前の観測時点との差分を出した。同じ期間の選挙、閣僚就任、報道された発言などのイベントを日付で対応付けている。各市町は自分自身の過去とだけ比べており、他の市町との比較はしていない。</p>
+<p class="byline">生成 {{ generated }} / 観測値 {{ counts.obs }} 件(うち未取得 {{ counts.missing_obs }} 件) / イベント {{ counts.events }} 件</p>
+
+<section class="points" aria-labelledby="pts">
+<h2 id="pts">要点</h2>
+<ul>
+{% if groups %}
+  {% set g = groups[0] %}
+  <li>{{ g.date }} の衆院選の後に最初に決まった値の直前比(各市町を自分の過去と比べた件数):
+    {% for ind in ['tokko_march', 'mlit_sole_grants', 'mlit_road'] %}
+      {% set c = first_counts[ind] %}
+      指標 {{ indicators[ind][0] }} {{ indicators[ind][1] }} は
+      <span class="up">増加 {{ c.get('増加', 0) }}</span>・<span class="flat">横ばい {{ c.get('横ばい', 0) }}</span>・<span class="down">減少 {{ c.get('減少', 0) }}</span>・<span class="flat">未取得 {{ c.get('未取得', 0) }}</span>{% if not loop.last %}、{% else %}。{% endif %}
+    {% endfor %}
+  </li>
+{% endif %}
+  <li>首長の支持表明: 出典つきで収集済 {{ counts.endorse_collected }} 市町、未収集 {{ counts.endorse_uncollected }} 市町。</li>
+  <li>政局イベント {{ counts.events }} 件のうち、報道等から手作業で登録したもの {{ counts.events_manual }} 件。出典のないイベントは登録していない。</li>
+  <li>この都道府県で未対応のソース: {% if counts.unsupported %}{% for s in counts.unsupported %}{{ s.source_id }}({{ s.status }}){% if not loop.last %}、{% endif %}{% endfor %}{% else %}なし{% endif %}。</li>
+  <li>町の特別交付税は総務省の報道発表に個別額がなく、全年度未取得。</li>
+</ul>
+</section>
+
+<div class="cards">
+  <div class="card"><div class="label">市町</div><div class="value">{{ munis|length }}</div><div class="sub">自治体ページあり</div></div>
+  <div class="card"><div class="label">観測値</div><div class="value">{{ counts.obs }}</div><div class="sub">未取得 {{ counts.missing_obs }}</div></div>
+  <div class="card"><div class="label">政局イベント</div><div class="value">{{ counts.events }}</div><div class="sub">手作業 {{ counts.events_manual }}</div></div>
+  <div class="card"><div class="label">支持表明 未収集</div><div class="value">{{ counts.endorse_uncollected }}</div><div class="sub">収集済 {{ counts.endorse_collected }}</div></div>
+</div>
+
+<h2 id="munis">自治体一覧と最新の差分</h2>
+<p>各指標で最も新しい観測時点の、直前の観測時点に対する差分。列見出しをクリックすると並べ替えられる。</p>
+<div class="filters" data-target="muni-table">
+  <label>自治体名で絞り込み <input type="search" data-col="1" placeholder="例: 那須"></label>
+  <span class="small" data-count></span>
+</div>
+<div class="table-wrap">
+<table id="muni-table">
+  <caption>市町別 各指標の最新の観測値と直前比(単位: 千円)</caption>
+  <thead><tr>
+    <th scope="col" data-sort>コード</th><th scope="col" data-sort>市町</th>
+    {% for ind, v in indicators.items() %}<th scope="col" class="num" data-sort>{{ v[0] }} {{ v[1] }}(千円)</th><th scope="col" data-sort>{{ v[0] }} 直前比</th>{% endfor %}
+  </tr></thead>
+  <tbody>
+  {% for code, name in munis %}
+    <tr>
+      <td class="date">{{ code }}</td>
+      <th scope="row"><a href="municipalities/{{ code }}.html">{{ name }}</a></th>
+      {% for ind in indicators %}
+        {% set r = latest.get((code, ind)) %}
+        {% if r and r.value is not none %}
+          <td class="num" data-value="{{ r.value }}" title="{{ r.period_start[:4] }}年度分 decided {{ r.decided_date }}">{{ r.value|num }}</td>
+          {{ mc.dircell(r.direction, r.delta_pct) }}
+        {% elif r %}
+          <td class="num flat" data-value="">未取得</td><td class="dir flat">—</td>
+        {% else %}
+          <td class="num flat">—</td><td class="dir flat">—</td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="source-note">出典: 各自治体ページの表の脚注を参照。指標の定義は<a href="about.html">方法と用語</a>。</p>
+
+<h2 id="elections">選挙</h2>
+<div class="table-wrap">
+<table>
+  <caption>登録済みの選挙(都道府県選管の確定値)</caption>
+  <thead><tr><th scope="col">選挙 ID</th><th scope="col">投票日</th><th scope="col" class="num">選挙区数</th><th scope="col">マトリックス</th></tr></thead>
+  <tbody>{% for g in groups %}<tr><th scope="row">{{ g.id }}</th><td class="date">{{ g.date }}</td><td class="num">{{ g.districts }}</td><td><a href="matrix/{{ g.id }}.html">表を開く</a></td></tr>{% endfor %}</tbody>
+</table>
+</div>
+
+<h2 id="coverage">データの取得状況</h2>
+<p>指標 × 年度ごとの、値を取得できた市町の数 / 市町の数。</p>
+<div class="table-wrap">
+<table>
+  <caption>指標 × 年度の取得状況(値のある市町数 / 市町数)</caption>
+  <thead><tr><th scope="col">指標</th>{% for y in years %}<th scope="col" class="num">{{ y }}年度</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for row in cov %}
+    <tr><th scope="row">{{ row.no }} {{ row.label }}<br><span class="small">{{ row.id }}</span></th>
+    {% for c in row.cells %}<td class="num">{% if c.n %}{{ c.ok }}/{{ c.n }}{% else %}<span class="flat">未取得</span>{% endif %}</td>{% endfor %}</tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="source-note">出典の URL と取得日は<a href="sources.html">データソース</a>。{% if errors %}最新の実行でエラーのままの項目 {{ errors|length }} 件(データソースのページに列挙)。{% endif %}</p>
+{% endblock %}

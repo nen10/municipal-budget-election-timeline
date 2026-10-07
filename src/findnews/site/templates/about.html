@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}方法と用語{% endblock %}
+{% block body %}
+<p class="kicker"><a href="index.html">{{ pref_name }}</a> / 方法と用語</p>
+<h1>方法と用語:何を、どう比べているか</h1>
+<p class="lead">このサイトは、公開資料から補助金・交付金・決算の値を取り出し、各自治体を自分自身の直前の観測時点と比べた差分を並べる。同じ時間軸に政局イベントを置き、日付の重なりで対応付ける。判断は読む人が行い、システムは表と件数を出すだけにしている。</p>
+
+<section class="points" aria-labelledby="pts"><h2 id="pts">要点</h2><ul>
+  <li>平均との比較・他自治体との比較はしない。直前の観測時点との差分(Δ)だけを示す。</li>
+  <li>差分とイベントの対応は日付の重なりによる機械的なもので、関係を示すものではない。</li>
+  <li>政党名・候補者名・首長名・役職・金額・日付は省略しない。発言は原文を引用し、出典を付ける。</li>
+</ul></section>
+
+<h2>差分時系列(DESIGN.md 第13節)</h2>
+<p>各自治体 × 指標について、観測時点ごとの値 x<sub>t</sub> と、直前の観測時点との差分 Δx<sub>t</sub> = x<sub>t</sub> − x<sub>t−1</sub>、変化率 Δx<sub>t</sub> / x<sub>t−1</sub>、方向を出す。観測時点は指標が持つ最も細かい単位で、年度に丸めない。</p>
+<div class="table-wrap" style="max-height:none"><table>
+  <caption>指標と観測時点</caption>
+  <thead><tr><th scope="col">指標 ID</th><th scope="col">番号</th><th scope="col">内容</th><th scope="col">所管</th></tr></thead>
+  <tbody>{% for k, v in indicators.items() %}<tr><th scope="row">{{ k }}</th><td>{{ v[0] }}</td><td>{{ v[1] }}</td><td>{{ v[2] or '—' }}</td></tr>{% endfor %}</tbody>
+</table></div>
+<ul>
+  <li><strong>period_start / period_end</strong>: 値が対象とする期間(会計年度)。</li>
+  <li><strong>decided_date</strong>: 値が決まった日。決算は年度末、特別交付税は交付決定日、国交省の当初配分は公表日で代用(「代用」と表示)。</li>
+  <li><strong>対応期間</strong>: 直前の観測時点の decided_date の翌日から、当該観測時点の decided_date まで。この期間と日付が重なるイベントを対応付ける。</li>
+  <li><strong>方向</strong>: 変化率が +{{ '%.1f'|format(threshold * 100) }}% 以上で増加、−{{ '%.1f'|format(threshold * 100) }}% 以下で減少、その間は横ばい。前の値が 0 または未取得なら変化率は未定義、方向は未取得。表示は文字と色(増加 <span class="up">青</span>、減少 <span class="down">赤</span>、横ばい・未取得 <span class="flat">灰</span>)を併用する。</li>
+  <li><strong>投票日後最初の差分</strong>: 投票日より後に決まった最初の観測時点の、直前比。マトリックスの軸 B と検出スコアに使う。</li>
+</ul>
+
+<h2>マトリックス(DESIGN.md 第11節)</h2>
+<ul>
+  <li><strong>A1</strong>: 首長の支持表明。支持候補の政党・公認の別・結果を行見出しにする。出典(URL・媒体・日付・引用文)のないものは「未収集」。</li>
+  <li><strong>A2</strong>: 自治体内の得票 1 位候補の政党・結果。1 位・2 位の得票率と差、当選者の自治体内順位を添える。</li>
+  <li><strong>A3</strong>: 当選者・比例復活者の選挙後の役職と、指標の所管省庁(総務省・国交省)との一致。</li>
+  <li>「勝者・敗者」の区分は補助表としてのみ出す。</li>
+</ul>
+
+<h2>他地域への展開(DESIGN.md 第14節)</h2>
+<p>データソースはアダプタ(IndicatorSource / ElectionSource)としてレジストリに登録し、都道府県コードを引数に取る。全国対応のソース(決算カード、特別交付税、国交省配分・道路局箇所表)は都道府県コードを変えるだけで取得できる。選管の得票資料は都道府県ごとにアダプタが必要で、未実装の県では「未対応」と表示する。手作業データ(支持表明、イベント、役職)は県ごとに出典つきで収集する。</p>
+
+<h2>記録の原則(DESIGN.md 11.6)</h2>
+<ul>
+  <li>政党名、候補者名、首長名、役職名、金額、日付は省略や匿名化をしない。</li>
+  <li>「勝者・敗者」「与党・野党」のような抽象ラベルは派生列としてのみ持ち、元の具体的な列を必ず残す。</li>
+  <li>発言は要約せず原文を引用文として保存し、発言者・場・日付・出典を付ける。</li>
+  <li>出典のない情報は入れない。未確認は「未収集」として残し、推測で埋めない。</li>
+  <li>結論的な文章を書かないのは、事実の列挙に徹するためであって、情報を薄めるためではない。</li>
+</ul>
+
+<h2>用語</h2>
+<dl class="facts">
+  <dt>社総交</dt><dd style="font-family:inherit">社会資本整備総合交付金</dd>
+  <dt>防安交</dt><dd style="font-family:inherit">防災・安全交付金</dd>
+  <dt>単独策定主体</dt><dd style="font-family:inherit">整備計画の計画策定主体が当該市町だけの計画(共同計画は市町別内訳がないため除く)</dd>
+  <dt>道路局箇所表</dt><dd style="font-family:inherit">国交省の当初配分「事業実施箇所」のうち道路局の箇所表。事業主体が当該市町の箇所の国費</dd>
+  <dt>未取得</dt><dd style="font-family:inherit">資料にない、または取得できていない値。推定で埋めない</dd>
+  <dt>未収集</dt><dd style="font-family:inherit">手作業データ(支持表明など)を出典つきで集められていないもの</dd>
+  <dt>代用</dt><dd style="font-family:inherit">decided_date を公表日で代用したもの</dd>
+</dl>
+{% endblock %}

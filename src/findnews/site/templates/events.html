@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "macros.html" as mc %}
+{% block title %}イベント{% endblock %}
+{% block body %}
+<p class="kicker"><a href="index.html">{{ pref_name }}</a> / 政局イベント</p>
+<h1>政局イベント {{ events|length }} 件(日付順)</h1>
+<p class="lead">選挙の投票日、閣僚・役職の就任、予算配分の公表日、報道された発言や省庁への問い合わせ、首長の支持表明を、出典つきで日付順に並べた。出典のないイベントは登録していない。引用は出典の原文。</p>
+<section class="points" aria-labelledby="pts">
+<h2 id="pts">要点</h2>
+<ul>
+  <li>自動生成 {{ events|selectattr('generated_by')|list|length }} 件(県選管の結果、首相官邸の名簿、国交省・総務省の公表日)、手作業登録 {{ events|rejectattr('generated_by')|list|length }} 件(報道等)。</li>
+  <li>種別: {% for t in types %}{{ t }} {{ events|selectattr('event_type', 'equalto', t)|list|length }} 件{% if not loop.last %}、{% endif %}{% endfor %}。</li>
+  <li>月単位・期間で記録したイベントは日付列に期間を示す(例: 2026-02-01〜2026-02-28 は「2026 年 2 月」までしか分からないもの)。</li>
+</ul>
+</section>
+<div class="filters" data-target="ev-table">
+  <label>種別 <select data-col="1"><option value="">すべて</option>{% for t in types %}<option>{{ t }}</option>{% endfor %}</select></label>
+  <label>範囲 <select data-col="2"><option value="">すべて</option>{% for s in scopes %}<option>{{ s }}</option>{% endfor %}</select></label>
+  <label>当事者(部分一致) <input type="search" data-col="4" placeholder="例: 簗"></label>
+  <span class="small" data-count></span>
+</div>
+<div class="table-wrap">
+<table id="ev-table">
+  <caption>政局イベント(日付順)</caption>
+  <thead><tr><th scope="col" data-sort>日付</th><th scope="col" data-sort>種別</th><th scope="col" data-sort>範囲</th><th scope="col" data-sort>選挙区・自治体</th><th scope="col" data-sort>当事者(政党、役職)</th><th scope="col">相手方(役職)</th><th scope="col">内容</th><th scope="col">引用</th><th scope="col">出典</th><th scope="col" data-sort>登録</th></tr></thead>
+  <tbody>
+  {% for e in events %}
+    <tr><td class="date">{{ e.date }}{% if e.end_date %}〜{{ e.end_date }}{% endif %}</td><td>{{ e.event_type }}</td><td>{{ e.scope }}</td>
+      <td>{% if e.municipality_code %}<a href="municipalities/{{ e.municipality_code }}.html">{{ e.municipality_code }}</a>{% else %}{{ e.district or '—' }}{% endif %}</td>
+      <th scope="row">{{ mc.event_who(e) }}</th><td>{{ mc.event_counterpart(e) }}</td>
+      <td class="wrap">{{ e.summary }}{% if e.note %}<br><span class="small">{{ e.note }}</span>{% endif %}</td>
+      <td class="wrap">{% if e.quote %}<span class="quote">{{ e.quote }}</span>{% else %}—{% endif %}</td>
+      <td class="wrap small">{{ e.outlet or '' }} {{ e.source_date or '' }}<br>{% if e.source_url %}<a href="{{ e.source_url }}">{{ e.source_url }}</a>{% endif %}</td>
+      <td class="small">{{ e.generated_by or '手作業' }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="source-note">出典: 各行の「出典」列。手作業の行は data/manual/events.csv。</p>
+{% endblock %}

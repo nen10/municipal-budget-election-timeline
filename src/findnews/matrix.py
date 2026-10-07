@@ -234,13 +234,13 @@ def _matrix(parts: list[Part], heading_attr: str, dirs: dict, entry, order: list
     return _t(["行(軸 A)", "計"] + B_ORDER + ["減少の割合(行の全件中)", f"減少の割合({V.MISSING}を除く)"], rows)
 
 
-def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: str | Path | None = None) -> dict:
-    from . import config
+def compute(conn: sqlite3.Connection, group: str, pref_code: str = "09") -> dict:
+    """マトリックスの材料(Web 表示と Markdown 出力で共通)。"""
     cfg = settings_mod.load()
     th = float(cfg["verification"]["direction_threshold"])
     parts, info = build_parts(conn, group)
     if not parts:
-        raise SystemExit(f"選挙 {group} の結果が DB にない(findnews fetch tochigi-election を先に実行)")
+        raise SystemExit(f"選挙 {group} の結果が DB にない(findnews fetch --source election を先に実行)")
     edate = next(iter(info.values()))["date"]
     codes = sorted({p.code for p in parts})
     from . import timeline
@@ -248,6 +248,13 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
     pp = {(c, k): timeline.first_after(trows, c, k, edate) for c in codes for k, _ in B_KEYS}
     dirs = {k: {c: (pp[(c, k)].direction if pp[(c, k)] else V.MISSING) for c in codes} for k, _ in B_KEYS}
     firsts = {k: sorted({r.decided_date for (c, kk), r in pp.items() if kk == k and r}) for k, _ in B_KEYS}
+    return {"parts": parts, "info": info, "edate": edate, "pp": pp, "dirs": dirs, "firsts": firsts, "th": th}
+
+
+def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: str | Path | None = None) -> dict:
+    from . import config
+    c = compute(conn, group, pref_code)
+    parts, info, edate, pp, dirs, firsts, th = (c["parts"], c["info"], c["edate"], c["pp"], c["dirs"], c["firsts"], c["th"])
 
     out_dir = Path(out_dir or config.PROCESSED_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -14,3 +14,5 @@ data/processed/*
 !data/processed/timeline_*.csv
 !data/processed/timeline_*/
 !data/processed/events_*.md
+# 静的サイトの生成物(findnews site build)
+data/processed/site/

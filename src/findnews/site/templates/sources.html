@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}データソース{% endblock %}
+{% block body %}
+<p class="kicker"><a href="index.html">{{ pref_name }}</a> / データソース</p>
+<h1>データソースと取得状況、既知の制約</h1>
+<p class="lead">各指標は公開資料をアダプタ経由で取得し、data/raw に保存した原資料からパースしている。ここでは、ソースごとの対応状況、最新の取得ログ、資料の構造による制約、計算の設定値を示す。</p>
+<section class="points" aria-labelledby="pts"><h2 id="pts">要点</h2><ul>
+  <li>{{ pref_name }}で対応しているソース {{ status|selectattr('status', 'equalto', '対応')|list|length }} / {{ status|length }}。</li>
+  <li>方向の閾値 ±{{ '%.1f'|format(threshold * 100) }}%、対象年度 {{ cfg.verification.period[0] }}–{{ cfg.verification.period[1] }}(config/settings.yaml)。</li>
+  <li>取得できなかった値は推定せず「未取得」と表示している。</li>
+</ul></section>
+
+<h2>ソースと対応状況</h2>
+<div class="table-wrap"><table>
+  <caption>登録済みアダプタと{{ pref_name }}での対応状況</caption>
+  <thead><tr><th scope="col">ID</th><th scope="col">種類</th><th scope="col">範囲</th><th scope="col">状態</th><th scope="col">内容</th><th scope="col">指標</th><th scope="col">注</th></tr></thead>
+  <tbody>{% for s in status %}<tr><th scope="row">{{ s.source_id }}</th><td>{{ s.kind }}</td><td>{{ s.coverage }}</td><td>{{ s.status }}</td><td>{{ s.label }}</td><td class="small">{{ s.indicators }}</td><td class="small">{{ s.note }}</td></tr>{% endfor %}</tbody>
+</table></div>
+
+<h2>指標 × 年度の取得状況</h2>
+<div class="table-wrap"><table>
+  <caption>値のある市町数 / 市町数、decided_date(公表日で代用したものは「代用」)と原資料</caption>
+  <thead><tr><th scope="col">指標</th>{% for y in years %}<th scope="col">{{ y }}年度</th>{% endfor %}</tr></thead>
+  <tbody>{% for row in cov %}<tr><th scope="row">{{ row.no }} {{ row.label }}</th>
+  {% for c in row.cells %}<td class="small">{% if c.n %}<span class="num">{{ c.ok }}/{{ c.n }}</span><br>{{ c.decided }}{% if c.proxy %}(代用){% endif %}<br>{% if c.url %}<a href="{{ c.url }}">原資料</a>{% endif %}{% else %}<span class="flat">未取得</span>{% endif %}</td>{% endfor %}</tr>{% endfor %}</tbody>
+</table></div>
+<div class="source-note">出典: 各セルの「原資料」リンク。取得日時と SHA-256 は data/raw/&lt;source&gt;/manifest.jsonl。</div>
+
+<h2>最新の取得ログ</h2>
+<div class="table-wrap"><table>
+  <caption>fetch_log(ソース × 段階ごとの最新)</caption>
+  <thead><tr><th scope="col">ソース</th><th scope="col">段階</th><th scope="col">状態</th><th scope="col">内容</th><th scope="col">日時</th></tr></thead>
+  <tbody>{% for r in log %}<tr><th scope="row">{{ r.source }}</th><td>{{ r.step }}</td><td>{{ r.status }}</td><td class="wrap small">{{ r.detail[:300] }}</td><td class="date small">{{ r.retrieved_at }}</td></tr>{% endfor %}</tbody>
+</table></div>
+
+<h2>既知の制約(DESIGN.md 第12節)</h2>
+<ol>
+  <li>指標 4・5: 国交省の公表 PDF では、複数自治体の共同計画の市町別内訳と、国道・県道の補助事業の事業主体が分からず、市町に割り振っていない。補正予算分は対象外。時事通信(2026-10-06)が国交省の数値として報じた「那須烏山市 −26.2%、那珂川町 −54.1%」は公表資料から再現できていない。</li>
+  <li>特別交付税: 総務省の報道発表は市分しか市町村別に載らず、町は都道府県計のみ。</li>
+  <li>選挙前後の区切り: 当初配分は公表日を decided_date として代用している。予算案の編成は投票日より前に進む。</li>
+  <li>権限の判定は省庁の所管一致のみで、党役職は扱っていない。</li>
+  <li>首長の支持表明は人が収集する。下野新聞は robots.txt で AI エージェントのアクセスを拒否している。開票区が選挙区をまたぐ自治体は選挙区ごとに 1 行。</li>
+  <li>2026 年度に対応する住民基本台帳人口は存在しない。</li>
+  <li>陰性事例(誤検知率の測定用)が 0 件。</li>
+  <li>発言キーワードのうち事例から追加したものは、その事例への一致を独立した検証に数えない。</li>
+</ol>
+
+<h2>設定値</h2>
+<dl class="facts">
+  <dt>方向の閾値</dt><dd>±{{ '%.1f'|format(threshold * 100) }}%</dd>
+  <dt>対象年度</dt><dd>{{ cfg.verification.period[0] }}–{{ cfg.verification.period[1] }}</dd>
+  <dt>設定ファイル</dt><dd>{{ cfg._path }}</dd>
+</dl>
+<h3>発言キーワードと由来(config/keywords.yaml)</h3>
+<div class="table-wrap"><table>
+  <caption>発言キーワード</caption>
+  <thead><tr><th scope="col">キーワード</th><th scope="col">由来</th><th scope="col">由来事例</th><th scope="col">由来の出典</th></tr></thead>
+  <tbody>{% for k in keywords %}<tr><th scope="row">{{ k.keyword }}</th><td>{{ k.origin }}</td><td>{{ k.origin_case_id or '—' }}</td><td class="small">{% if k.origin_source_url %}<a href="{{ k.origin_source_url }}">{{ k.origin_source_url }}</a>{% else %}—{% endif %}</td></tr>{% endfor %}</tbody>
+</table></div>
+{% endblock %}

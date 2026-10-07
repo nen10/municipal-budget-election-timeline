@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "site",
+      "runtimeExecutable": "/Users/nenten/Desktop/cosmos/random-idea/find-news/.venv/bin/python",
+      "runtimeArgs": ["-u", "-m", "findnews.cli", "site", "serve", "--port", "8765"],
+      "port": 8765
+    }
+  ]
+}

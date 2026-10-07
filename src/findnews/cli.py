@@ -9,6 +9,7 @@
   findnews verify   --pref <2桁>          (別名: findnews verify tochigi)
   findnews detect run --pref <2桁> [--election <選挙ID>]
   findnews sources list [--pref <2桁>]
+  findnews site build --pref <2桁> / findnews site serve [--port 8765]
   findnews manual load / status
 """
 
@@ -202,6 +203,39 @@ def sources_list(ctx, pref):
     click.echo("\n指標 ID:")
     for k, (no, label, ministry) in INDICATORS.items():
         click.echo(f"  {k:18s} 指標 {no:3s} {label}" + (f"(所管 {ministry})" if ministry else ""))
+
+
+@main.group("site")
+def site_group():
+    """静的サイト(DESIGN.md 第15節)。"""
+
+
+@site_group.command("build")
+@click.option("--pref", default="09", show_default=True)
+@click.option("--out", "out_dir", type=click.Path(), default=None, help="出力先(既定: data/processed/site)")
+@click.pass_context
+def site_build(ctx, pref, out_dir):
+    """data/processed/site/ に静的 HTML を生成する(外部通信なし)。"""
+    from .site import build
+    res = build.build(_conn(ctx.obj["db"]), pref, Path(out_dir) if out_dir else None)
+    _echo({"out": res["out"], "pages": res["pages"]})
+
+
+@site_group.command("serve")
+@click.option("--port", default=8765, show_default=True)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--dir", "site_dir", type=click.Path(), default=None, help="公開するディレクトリ(既定: data/processed/site)")
+def site_serve(port, host, site_dir):
+    """生成済みサイトをローカルの HTTP サーバで表示する(Python 標準の http.server)。"""
+    import functools
+    import http.server
+    d = Path(site_dir or config.PROCESSED_DIR / "site")
+    if not (d / "index.html").exists():
+        raise click.UsageError(f"{d}/index.html がない。先に `findnews site build` を実行する")
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(d))
+    with http.server.ThreadingHTTPServer((host, port), handler) as srv:
+        click.echo(f"serving {d} at http://{host}:{port}/  (Ctrl-C で終了)")
+        srv.serve_forever()
 
 
 @main.group("manual")

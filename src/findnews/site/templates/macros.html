@@ -1,0 +1,23 @@
+{% macro sources(urls, label='出典') -%}
+{% if urls %}
+<div class="source-note">{{ label }}:
+  <ol>{% for u in urls %}<li><a href="{{ u }}">{{ u }}</a></li>{% endfor %}</ol>
+</div>
+{% endif %}
+{%- endmacro %}
+
+{% macro dircell(direction, pct) -%}
+<td class="dir {{ dir_class(direction) }}">{{ dir_text(direction, pct) }}</td>
+{%- endmacro %}
+
+{% macro legend() -%}
+<div class="legend" aria-hidden="true"><span><span class="key up"></span>増加(直前比 +閾値以上)</span><span><span class="key down"></span>減少(−閾値以下)</span><span><span class="key flat"></span>横ばい・未取得</span><span>灰色の縦線と番号: 政局イベント</span></div>
+{%- endmacro %}
+
+{% macro event_who(e) -%}
+{% if e.actor_name %}{{ e.actor_name }}{% if e.actor_party %}({{ e.actor_party }}){% endif %}{% if e.actor_role %} {{ e.actor_role }}{% endif %}{% else %}—{% endif %}
+{%- endmacro %}
+
+{% macro event_counterpart(e) -%}
+{% if e.counterpart_name %}{{ e.counterpart_name }}({{ e.counterpart_role }}){% else %}—{% endif %}
+{%- endmacro %}

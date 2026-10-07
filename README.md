@@ -30,6 +30,8 @@ python3.13 -m venv .venv            # Python 3.11 以上
 | `findnews verify --pref 09`(別名 `verify tochigi`) | 第10節: 全市町の時系列記録 → `verification_tochigi.md` |
 | `findnews matrix --pref 09 --election shugiin_20260208` | 第11節: 分離マトリックス → `matrix_tochigi_<選挙ID>.md/.csv` |
 | `findnews detect run --pref 09 [--election ID]` | 自治体自身の差分・発言一致・寄与内訳つきスコア → `reports/<run_id>/` |
+| `findnews site build --pref 09` | 第15節: 静的サイトを `data/processed/site/` に生成(外部通信なし。生成物は版管理外) |
+| `findnews site serve [--port 8765]` | 生成済みサイトをローカルで表示(Python 標準の http.server)。`http://127.0.0.1:8765/` |
 | `findnews status` | テーブル件数と fetch_log の最新状態 |
 
 ソース ID: `soumu_jumin`(全国の市区町村マスタと人口。他県では最初に実行)、`soumu_card`、`soumu_tokko`、`mlit_grants`、
@@ -111,6 +113,29 @@ python3.13 -m venv .venv            # Python 3.11 以上
 - `data/processed/matrix_tochigi_<選挙ID>.md` / `.csv`: A1(首長の支持)・A2(自治体内得票)・A3(議員の役職)× 指標 3〜5 の投票日後最初の差分の方向
 - `data/processed/reports/<run_id>/report.md`, `signals.csv`: 寄与内訳つきスコア(投票日後最初の差分の減少 0.6・発言 0.3・権限 0.1・反転 0.0)
 
+## Web 表示(DESIGN.md 第15節)
+
+```sh
+.venv/bin/findnews site build --pref 09
+.venv/bin/findnews site serve --port 8765      # http://127.0.0.1:8765/
+```
+
+`data/processed/site/index.html` をブラウザで直接開いても同じ表示になる(相対リンクのみ、外部 CDN なし)。
+`.claude/launch.json` に同じサーバの設定(name: `site`、ポート 8765)がある。
+
+| ページ | 内容 |
+|---|---|
+| `index.html` | 要点、取得状況(指標 × 年度)、未収集・未対応の件数、選挙一覧、市町一覧(各指標の最新の直前比) |
+| `municipalities/<code>.html` | 要点、指標ごとの推移グラフ(SVG、イベントは灰色の縦線と番号)と差分表、事業別一覧、関係イベント、出典 |
+| `matrix/<選挙ID>.html` | A1 × B、A2 × B、選挙区別、派生区分の補助表(自治体名は自治体ページへのリンク) |
+| `events.html` | イベント一覧(種別・範囲・当事者で絞り込み、出典と引用) |
+| `sources.html` | ソースと対応状況、取得ログ、既知の制約(第12節)、設定値、発言キーワード |
+| `about.html` | 方法(第13・14節)、記録の原則(11.6)、用語 |
+
+表示: 増加は青、減少は赤、横ばい・未取得は灰で、必ず「減少 −66.1%」のように文字でも併記する(青・赤の組は dataviz の
+検証スクリプトで色覚の差異を確認済み)。数値は等幅・右揃え、単位は列見出し、表には caption と scope、出典は表の直下に URL で示す。
+JavaScript は表のソート・絞り込みとグラフのホバーだけで、依存ライブラリはない。
+
 ## テスト
 
 ```sh
@@ -131,6 +156,7 @@ src/findnews/
   fetch/elections/  都道府県選管アダプタ(pref09_tochigi.py)
   parse/     PDF/Excel のパーサー(ネットワーク非依存)
   detect/    パネル、スコア、レポート
+  site/      静的サイト(build.py、templates/、static/style.css・site.js)
   pipeline.py fetch 本体、timeline.py 第13節、events.py イベント、verify.py 第10節、matrix.py 第11節、
   prefs.py 都道府県表、municipalities.py 市区町村マスタ、manual.py 手作業データ、cli.py
 config/settings.yaml
