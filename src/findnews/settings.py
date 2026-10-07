@@ -12,10 +12,6 @@ DEFAULTS = {
     "verification": {
         "period": [2021, 2026],
         "direction_threshold": 0.05,
-        "pre_years": [2023, 2024, 2025],
-        "pre_years_tokko": [2022, 2023, 2024],
-        "post_year": 2026,
-        "post_year_tokko": 2025,
     }
 }
 

@@ -170,4 +170,8 @@ def load_all(conn: sqlite3.Connection, manual_dir: Path | None = None) -> dict:
     conn.commit()
     from .fetch.tochigi_election import finalize_results
     finalize_results(conn)
+    # 手作業のイベント(出典 URL のある行のみ)
+    if (d / "events.csv").exists():
+        from .events import import_csv
+        counts["events"] = import_csv(conn, d / "events.csv")["imported"]
     return counts

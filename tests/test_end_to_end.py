@@ -7,7 +7,7 @@ from click.testing import CliRunner
 from findnews import manual, matrix, verify
 from findnews.cli import main
 from findnews.detect import run as detect_run
-from findnews.fetch import kokkai, mlit_grants, mlit_road, soumu_card, soumu_tokko, tochigi_election
+from findnews.fetch import kokkai, mlit_grants, soumu_card, soumu_tokko, tochigi_election
 
 BANNED = ("圧力をかけた", "報復した", "不正があった", "報復が", "圧力があった")
 
@@ -19,7 +19,14 @@ def _load(conn, fixtures):
     xls = fixtures / "shugiin_r08syugi_smd_kaihyo.xls"
     tochigi_election.load(conn, tochigi_election.parse([xls], {xls: [fixtures / "kouho_r08syugi_3.pdf"]}))
     kokkai.load(conn, kokkai.parse([fixtures / "kokkai_sample.json"]))
+    from findnews.pipeline import store_observations
+    from findnews.sources import INDICATOR_SOURCES as S
+    store_observations(conn, S["soumu_card"].parse(fixtures / "card_2024_sample.xlsx", "09"))
+    store_observations(conn, S["soumu_tokko"].parse(fixtures / "tokko_2025_03_sample.pdf", "09"))
+    store_observations(conn, S["mlit_road"].parse(fixtures / "kasho_2026_09_road_sample.pdf", "09"))
     manual.load_all(conn)
+    from findnews import events
+    events.generate(conn, "09")
 
 
 def test_election_attributes_and_pr(conn, fixtures):
@@ -51,8 +58,9 @@ def test_matrix_and_verify_outputs(conn, fixtures, tmp_path):
     verify.run(conn, out)
     v = out.read_text(encoding="utf-8")
     assert "那須烏山市(092151)" in v and "未取得" in v
-    assert "1年前倒し" not in v and "2022–2024" in v     # 指標 3 の選挙前は 2022–2024 年度
-    assert r["pre_years_ind3"] == "[2022, 2023, 2024]" and r["post_year_ind3"] == "2025"
+    assert "選挙前平均" not in v and "選挙後最初の差分" in v
+    assert r["tokko_march_decided_date"] == "2026-03-17" and r["tokko_march_value"] == "532034.0"
+    assert r["tokko_march_prev_value"] == "" and r["tokko_march_direction"] == "未取得"   # 直前の 3 月分はフィクスチャにない
     assert "z=" not in v and "ピア" not in v        # 他自治体との比較はしない
     for text in (md, v):
         for b in BANNED:
@@ -62,6 +70,9 @@ def test_matrix_and_verify_outputs(conn, fixtures, tmp_path):
 def test_detect_offline(conn, fixtures, tmp_path):
     _load(conn, fixtures)
     mlit_grants.load(conn, mlit_grants.parse([fixtures / "kasho_2026_09_sample.pdf"]))
+    from findnews.pipeline import store_observations
+    from findnews.sources import INDICATOR_SOURCES as S
+    store_observations(conn, S["mlit_grants"].parse(fixtures / "kasho_2026_09_sample.pdf", "09"))
     res = detect_run.run(conn, "09", tmp_path / "out", "shugiin_20260208")
     md = (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
     assert "要検証シグナル" in md and res["n_signals"] > 0
@@ -79,3 +90,23 @@ def test_cli_db_init(tmp_path):
     r = CliRunner().invoke(main, ["--db", str(tmp_path / "x.sqlite"), "db", "init"])
     assert r.exit_code == 0, r.output
     assert "subsidy_allocations" in r.output
+
+
+def test_timeline_cli_and_sources_list(tmp_path, fixtures):
+    from findnews import db
+    dbp = tmp_path / "t.sqlite"
+    c = db.connect(dbp)
+    db.init_db(c)
+    db.ensure_municipalities(c)
+    _load(c, fixtures)
+    c.close()
+    r = CliRunner().invoke(main, ["--db", str(dbp), "timeline", "--pref", "09", "--muni", "092151", "--out", str(tmp_path)])
+    assert r.exit_code == 0, r.output
+    md = (tmp_path / "timeline_09" / "092151.md").read_text(encoding="utf-8")
+    assert "首長の支持表明" in md and "川俣純子" in md and "簗和生" in md and "大幅にカット" in md
+    for b in BANNED:
+        assert b not in md
+    r = CliRunner().invoke(main, ["--db", str(dbp), "sources", "list", "--pref", "13"])
+    assert r.exit_code == 0 and "未対応" in r.output
+    r = CliRunner().invoke(main, ["--db", str(dbp), "matrix", "--pref", "13", "--election", "shugiin_20260208"])
+    assert r.exit_code == 0 and "未対応" in r.output

@@ -1,4 +1,16 @@
-"""コマンドライン: findnews db init / fetch <source> / manual load / detect run / status。"""
+"""コマンドライン(DESIGN.md 14.3)。
+
+  findnews db init
+  findnews fetch    --pref <2桁> --years 2021-2026 [--source <id> ...] [--offline] [--force]
+  findnews events   import data/manual/events.csv
+  findnews events   generate --pref <2桁>
+  findnews timeline --pref <2桁> [--muni <6桁>] [--indicator <id>]
+  findnews matrix   --pref <2桁> --election <選挙ID>
+  findnews verify   --pref <2桁>          (別名: findnews verify tochigi)
+  findnews detect run --pref <2桁> [--election <選挙ID>]
+  findnews sources list [--pref <2桁>]
+  findnews manual load / status
+"""
 
 from __future__ import annotations
 
@@ -8,13 +20,31 @@ from pathlib import Path
 import click
 
 from . import config, db, manual
-from .detect import run as detect_run
+from .municipalities import load_masters
 
 
 def _conn(path):
     conn = db.connect(path)
     db.init_db(conn)
+    load_masters(conn)
     return conn
+
+
+def _years(spec: str | None) -> list[int]:
+    if not spec:
+        return []
+    out = []
+    for part in spec.split(","):
+        if "-" in part:
+            a, b = part.split("-")
+            out += list(range(int(a), int(b) + 1))
+        else:
+            out.append(int(part))
+    return out
+
+
+def _echo(obj):
+    click.echo(json.dumps(obj, ensure_ascii=False, default=str))
 
 
 @click.group()
@@ -41,122 +71,101 @@ def db_init(ctx):
     click.echo("tables: " + ", ".join(sorted(tables)))
 
 
-@main.group("fetch")
-def fetch_group():
-    """データ取得(一覧 → data/raw 保存 → パース → DB 投入)。--offline で保存済みファイルのみ使う。"""
-
-
-def _offline_opts(f):
-    f = click.option("--offline", is_flag=True, help="ネットワークに出ず data/raw の既存ファイルだけをパース")(f)
-    f = click.option("--force", is_flag=True, help="保存済みでも再ダウンロード")(f)
-    return f
-
-
-@fetch_group.command("soumu-card")
-@click.option("--years", default=5, show_default=True, help="直近何年度分")
-@_offline_opts
+@main.command("fetch")
+@click.option("--pref", default="09", show_default=True, help="都道府県コード 2 桁")
+@click.option("--years", default="2020-2026", show_default=True, help="対象年度(例: 2021-2026、2024,2025)")
+@click.option("--source", "sources", multiple=True,
+              help="ソース ID(複数可。soumu_jumin, soumu_card, soumu_tokko, mlit_grants, mlit_road, election, kokkai)。省略時は全部")
+@click.option("--offline", is_flag=True, help="ネットワークに出ず data/raw の既存ファイルだけをパース")
+@click.option("--force", is_flag=True, help="保存済みでも再ダウンロード")
 @click.pass_context
-def f_card(ctx, years, offline, force):
-    """総務省 市町村決算カード(栃木県)。"""
-    from .fetch import soumu_card
-    click.echo(json.dumps(soumu_card.run(_conn(ctx.obj["db"]), years, offline, force), ensure_ascii=False))
+def fetch_cmd(ctx, pref, years, sources, offline, force):
+    """データ取得(一覧 → data/raw 保存 → パース → DB と observations に投入)。未対応のソースは「未対応」と出力する。"""
+    from . import pipeline
+    _echo(pipeline.run(_conn(ctx.obj["db"]), pref, _years(years), list(sources) or None, offline, force))
 
 
-@fetch_group.command("soumu-tokko")
-@click.option("--from-year", default=2020, show_default=True)
-@click.option("--to-year", default=2025, show_default=True)
-@_offline_opts
+@main.group("events")
+def events_group():
+    """政局イベント(DESIGN.md 13.3)。"""
+
+
+@events_group.command("import")
+@click.argument("path", type=click.Path(exists=True), default=str(config.MANUAL_DIR / "events.csv"))
 @click.pass_context
-def f_tokko(ctx, from_year, to_year, offline, force):
-    """総務省 特別交付税 報道発表(12 月分・3 月分)。"""
-    from .fetch import soumu_tokko
-    click.echo(json.dumps(soumu_tokko.run(_conn(ctx.obj["db"]), list(range(from_year, to_year + 1)), offline, force),
-                          ensure_ascii=False, default=str))
+def events_import(ctx, path):
+    """手作業のイベント CSV を取り込む(出典 URL のない行は登録しない)。"""
+    from . import events
+    _echo(events.import_csv(_conn(ctx.obj["db"]), path))
 
 
-@fetch_group.command("mlit-grants")
-@_offline_opts
+@events_group.command("generate")
+@click.option("--pref", default="09", show_default=True)
 @click.pass_context
-def f_mlit(ctx, offline, force):
-    """国交省 社会資本整備総合交付金・防災・安全交付金・道路メンテナンス事業(当初配分、栃木県)。"""
-    from .fetch import mlit_grants
-    click.echo(json.dumps(mlit_grants.run(_conn(ctx.obj["db"]), None, offline, force), ensure_ascii=False))
+def events_generate(ctx, pref):
+    """選挙投票日・役職就任・配分公表日・交付決定日のイベントを自動登録する。"""
+    from . import events
+    _echo(events.generate(_conn(ctx.obj["db"]), pref))
 
 
-@fetch_group.command("mlit-road")
-@_offline_opts
+@main.command("timeline")
+@click.option("--pref", default="09", show_default=True)
+@click.option("--muni", "munis", multiple=True, help="自治体コード 6 桁(複数可。省略時は全市区町村)")
+@click.option("--indicator", "indicators", multiple=True, help="指標 ID(複数可。`findnews sources list` 参照)")
+@click.option("--out", "out_dir", type=click.Path(), default=None, help="出力ディレクトリ(既定: data/processed)")
 @click.pass_context
-def f_mlit_road(ctx, offline, force):
-    """国交省 道路局 当初配分箇所表(栃木県、事業主体別)。PDF は mlit-grants と共通。"""
-    from .fetch import mlit_road
-    click.echo(json.dumps(mlit_road.run(_conn(ctx.obj["db"]), offline, force), ensure_ascii=False))
+def timeline_cmd(ctx, pref, munis, indicators, out_dir):
+    """差分時系列と政局イベントの対応表(timeline_<pref>.csv、timeline_<pref>/<自治体>.md、events_<pref>.md)。"""
+    from . import timeline
+    from .municipalities import MasterNotAvailable
+    try:
+        _echo(timeline.run(_conn(ctx.obj["db"]), pref, list(munis) or None, list(indicators) or None,
+                           Path(out_dir) if out_dir else None))
+    except MasterNotAvailable as e:
+        _echo({"status": "未対応", "reason": str(e)})
 
 
-@fetch_group.command("soumu-jumin")
-@_offline_opts
+@main.group("verify", invoke_without_command=True)
+@click.option("--pref", default="09", show_default=True)
+@click.option("--out", "out_path", type=click.Path(), default=None, help="出力先(既定: data/processed/verification_<slug>.md)")
 @click.pass_context
-def f_jumin(ctx, offline, force):
-    """総務省 住民基本台帳人口(市区町村別、最新年)。検証の参考人口列に使う。"""
-    from .fetch import soumu_jumin
-    click.echo(json.dumps(soumu_jumin.run(_conn(ctx.obj["db"]), offline, force), ensure_ascii=False))
+def verify_group(ctx, pref, out_path):
+    """検証(DESIGN.md 第10節): 都道府県内の全市区町村の時系列記録。"""
+    if ctx.invoked_subcommand is None:
+        _verify(ctx, pref, out_path)
 
 
-@fetch_group.command("tochigi-election")
-@_offline_opts
+def _verify(ctx, pref, out_path):
+    from . import verify
+    from .prefs import slug
+    out = Path(out_path) if out_path else config.PROCESSED_DIR / f"verification_{slug(pref)}.md"
+    res = verify.run(_conn(ctx.obj["db"]), out, pref)
+    _echo({"out": str(out), "municipalities": len(res.codes), "item_rows": len(res.item_rows), "threshold": res.threshold})
+
+
+@verify_group.command("tochigi")
+@click.option("--out", "out_path", type=click.Path(), default=None)
 @click.pass_context
-def f_election(ctx, offline, force):
-    """栃木県選管 衆院選(2026-02, 2024-10, 2021-10)の開票区別得票と候補者届出状況公表票。"""
-    from .fetch import tochigi_election
+def verify_tochigi(ctx, out_path):
+    """`verify --pref 09` の別名。"""
+    _verify(ctx, "09", out_path)
+
+
+@main.command("matrix")
+@click.option("--pref", default="09", show_default=True)
+@click.option("--election", required=True, help="選挙 ID(例: shugiin_20260208, shugiin_20241027, shugiin_20211031)")
+@click.option("--out", "out_dir", type=click.Path(), default=None, help="出力ディレクトリ(既定: data/processed)")
+@click.pass_context
+def matrix_cmd(ctx, pref, election, out_dir):
+    """国政選挙との分離マトリックス(DESIGN.md 第11節)。"""
+    from . import matrix
+    from .sources import election_source
     conn = _conn(ctx.obj["db"])
-    res = tochigi_election.run(conn, offline, force)
-    manual.load_all(conn)  # 比例復活・議員 ID の反映
-    click.echo(json.dumps(res, ensure_ascii=False))
-
-
-@fetch_group.command("kokkai")
-@click.option("--since", default="2015-01-01", show_default=True, help="キーワード全体検索の開始日")
-@click.option("--max-records", default=300, show_default=True, help="1 クエリあたりの取得上限")
-@click.option("--offline", is_flag=True)
-@click.pass_context
-def f_kokkai(ctx, since, max_records, offline):
-    """国会会議録検索システム API(設計書 5.3 のキーワード)。"""
-    from .fetch import kokkai
-    click.echo(json.dumps(kokkai.run(_conn(ctx.obj["db"]), since, offline, None, max_records), ensure_ascii=False))
-
-
-@fetch_group.command("all")
-@_offline_opts
-@click.pass_context
-def f_all(ctx, offline, force):
-    """全ソースを順に実行(手作業データを先に読み込む)。"""
-    from .fetch import kokkai, mlit_grants, mlit_road, soumu_card, soumu_jumin, soumu_tokko, tochigi_election
-    conn = _conn(ctx.obj["db"])
-    click.echo(json.dumps({"manual": manual.load_all(conn)}, ensure_ascii=False))
-    for name, fn in [("soumu_card", lambda: soumu_card.run(conn, 5, offline, force)),
-                     ("soumu_tokko", lambda: soumu_tokko.run(conn, None, offline, force)),
-                     ("mlit_grants", lambda: mlit_grants.run(conn, None, offline, force)),
-                     ("mlit_road", lambda: mlit_road.run(conn, True, force)),
-                     ("soumu_jumin", lambda: soumu_jumin.run(conn, offline, force)),
-                     ("tochigi_election", lambda: tochigi_election.run(conn, offline, force)),
-                     ("kokkai", lambda: kokkai.run(conn, offline=offline))]:
-        try:
-            click.echo(json.dumps({name: fn()}, ensure_ascii=False, default=str))
-        except Exception as e:  # noqa: BLE001
-            click.echo(json.dumps({name: f"ERROR {e!r}"}, ensure_ascii=False))
-    manual.load_all(conn)  # 議員 ID の再リンク
-
-
-@main.group("manual")
-def manual_group():
-    """手作業データ(data/manual)。"""
-
-
-@manual_group.command("load")
-@click.option("--dir", "manual_dir", type=click.Path(exists=True), default=None)
-@click.pass_context
-def manual_load(ctx, manual_dir):
-    click.echo(json.dumps(manual.load_all(_conn(ctx.obj["db"]), Path(manual_dir) if manual_dir else None),
-                          ensure_ascii=False))
+    if not conn.execute("SELECT 1 FROM elections WHERE pref_code=? AND election_id LIKE ?", (pref, election + "_%")).fetchone():
+        _echo({"status": "未対応", "reason": f"都道府県 {pref} の選挙 {election} の得票データがない"
+               + ("" if election_source(pref) else "(この都道府県の選管アダプタが未実装)")})
+        return
+    _echo(matrix.run(conn, election, pref, out_dir))
 
 
 @main.group("detect")
@@ -170,41 +179,41 @@ def detect_group():
 @click.option("--out", "out_dir", type=click.Path(), default=None, help="出力先(既定: data/processed/reports/<run_id>)")
 @click.pass_context
 def detect_cmd(ctx, pref, election, out_dir):
-    """パネル構築・自治体自身の時系列における減少・発言一致・寄与内訳つきスコアを CSV と Markdown に出力。"""
-    conn = _conn(ctx.obj["db"])
-    res = detect_run.run(conn, pref, Path(out_dir) if out_dir else None, election)
-    click.echo(json.dumps(res, ensure_ascii=False))
+    """パネル構築・自治体自身の差分・発言一致・寄与内訳つきスコアを CSV と Markdown に出力。"""
+    from .detect import run as detect_run
+    _echo(detect_run.run(_conn(ctx.obj["db"]), pref, Path(out_dir) if out_dir else None, election))
 
 
-@main.group("verify")
-def verify_group():
-    """検証(DESIGN.md 第10節)。"""
+@main.group("sources")
+def sources_group():
+    """データソース(アダプタ)のレジストリ。"""
 
 
-@verify_group.command("tochigi")
-@click.option("--out", "out_path", type=click.Path(), default=None,
-              help="出力先(既定: data/processed/verification_tochigi.md)")
+@sources_group.command("list")
+@click.option("--pref", default="09", show_default=True, help="対応状況を表示する都道府県")
 @click.pass_context
-def verify_tochigi(ctx, out_path):
-    """栃木県全 25 市町の補助金・交付金の時系列記録(各自治体を自分の過去とだけ比べる)。"""
-    from . import verify
-    out = Path(out_path) if out_path else config.PROCESSED_DIR / "verification_tochigi.md"
-    res = verify.run(_conn(ctx.obj["db"]), out, "09")
-    click.echo(json.dumps({"out": str(out), "municipalities": len(res.codes), "item_rows": len(res.item_rows),
-                           "threshold": res.threshold}, ensure_ascii=False))
+def sources_list(ctx, pref):
+    """登録済みのアダプタと、指定した都道府県での対応状況。"""
+    from .sources import INDICATORS, status_for_pref
+    _conn(ctx.obj["db"])
+    for r in status_for_pref(pref):
+        click.echo(f"{r['source_id']:18s} {r['kind']:10s} {r['coverage']:10s} {r['status']}  {r['label']}"
+                   + (f"  [{r['indicators']}]" if r["indicators"] else "") + (f"  注: {r['note']}" if r["note"] else ""))
+    click.echo("\n指標 ID:")
+    for k, (no, label, ministry) in INDICATORS.items():
+        click.echo(f"  {k:18s} 指標 {no:3s} {label}" + (f"(所管 {ministry})" if ministry else ""))
 
 
-@main.command("matrix")
-@click.option("--pref", default="09", show_default=True)
-@click.option("--election", required=True, help="選挙 ID(例: shugiin_20260208, shugiin_20241027, shugiin_20211031)")
-@click.option("--out", "out_dir", type=click.Path(), default=None, help="出力ディレクトリ(既定: data/processed)")
+@main.group("manual")
+def manual_group():
+    """手作業データ(data/manual)。"""
+
+
+@manual_group.command("load")
+@click.option("--dir", "manual_dir", type=click.Path(exists=True), default=None)
 @click.pass_context
-def matrix_cmd(ctx, pref, election, out_dir):
-    """国政選挙との分離マトリックス(DESIGN.md 第11節)。"""
-    from . import matrix
-    if pref != "09":
-        raise click.UsageError("第1フェーズは栃木県(09)のみ対応")
-    click.echo(json.dumps(matrix.run(_conn(ctx.obj["db"]), election, pref, out_dir), ensure_ascii=False, default=str))
+def manual_load(ctx, manual_dir):
+    _echo(manual.load_all(_conn(ctx.obj["db"]), Path(manual_dir) if manual_dir else None))
 
 
 @main.command("status")
@@ -217,7 +226,7 @@ def status(ctx):
     click.echo("\n-- fetch_log (source, step ごとの最新) --")
     for r in conn.execute("""SELECT source, step, status, detail FROM fetch_log WHERE id IN
                              (SELECT MAX(id) FROM fetch_log GROUP BY source, step) ORDER BY source, step"""):
-        click.echo(f"{r['source']:18s} {r['step']:9s} {r['status']:6s} {r['detail'][:150]}")
+        click.echo(f"{r['source']:18s} {r['step']:12s} {r['status']:6s} {r['detail'][:150]}")
 
 
 if __name__ == "__main__":

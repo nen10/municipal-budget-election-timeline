@@ -29,15 +29,6 @@ def test_max_decline():
     assert m["decline"] == 30 and abs(m["rate"] - 0.25) < 1e-12
 
 
-def test_pre_post():
-    x = s({2023: 100, 2024: 200, 2025: 300, 2026: 100})
-    p = V.pre_post(x, [2023, 2024, 2025], 2026, 0.05)
-    assert p["pre"] == 200 and p["post"] == 100 and p["diff"] == -100 and p["rate"] == -0.5
-    assert p["direction"] == "減少"
-    p = V.pre_post(s({2023: 100, 2024: None, 2025: 300, 2026: 100}), [2023, 2024, 2025], 2026, 0.05)
-    assert p["pre"] is None and p["direction"] == V.MISSING
-
-
 def test_classify_items():
     prev = {"A計画": 100, "B計画（第三期）": 50, "C": 10, "D": 5}
     cur = {"A計画": 80, "B計画（第四期）": 60, "C": 10, "E": 7}

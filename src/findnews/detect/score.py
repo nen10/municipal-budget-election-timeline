@@ -1,9 +1,9 @@
 """寄与内訳つきスコア(設計書 5.6)。
 
 score = Σ weight_i × contribution_i(各寄与は 0〜1)
-  own_decline      (0.6): 選挙後の値が当該自治体自身の選挙前平均より減った割合のうち最大のもの(指標 3・4・5)。
-                          contribution = min(1, max(0, -(選挙後 − 選挙前平均) / 選挙前平均))
-                          他自治体との比較は使わない。
+  own_decline      (0.6): 投票日の直後に来る最初の観測時点の、直前の観測時点に対する変化率(指標 3 の 3 月分・4・5)
+                          のうち最も負のもの。contribution = min(1, max(0, -変化率))
+                          平均との比較・他自治体との比較は使わない(DESIGN.md 13 節)。
   statement_match  (0.3): 当該議員の発言、または当該自治体名を含む発言でキーワードに一致した件数 n → min(1, n/3)。
                           キーワードの由来事例への一致(config/keywords.yaml の origin_case_id)は数えない
   authority        (0.1): 減少が最大の指標の所管省庁(指標 3 = 総務省、4・5 = 国土交通省)と、
@@ -25,7 +25,7 @@ import pandas as pd
 from .statements import by_politician, independent, mentioning
 
 WEIGHTS = {"own_decline": 0.6, "statement_match": 0.3, "authority": 0.1, "reversal": 0.0}
-INDICATOR_MINISTRY = {"3b": "総務省", "4": "国土交通省", "5": "国土交通省"}
+INDICATOR_MINISTRY = {"tokko_march": "総務省", "mlit_sole_grants": "国土交通省", "mlit_road": "国土交通省"}
 
 
 def decline_contribution(rate: float | None) -> float:
@@ -63,16 +63,17 @@ def authority_contribution(positions: pd.DataFrame, politician_id: str, ministry
     return 0.0, f"所管不一致または決定時点で未就任(指標の所管: {ministry}、決定日 {when})。役職: {desc}"
 
 
-def compute_signals(prepost: dict, decision_dates: dict, panel: pd.DataFrame, statements: pd.DataFrame,
+def compute_signals(first: dict, panel: pd.DataFrame, statements: pd.DataFrame,
                     positions: pd.DataFrame) -> pd.DataFrame:
-    """prepost: {(code, key): verify.pre_post の結果}、decision_dates: {key: 選挙後の値の決定日(date)}"""
+    """first: {(code, indicator_id): 投票日後最初の観測時点の差分(dict: period_start, decided_date, prev_value, value,
+    delta, delta_pct, direction, event_ids)または None}"""
     rows = []
     for p in panel.itertuples(index=False):
-        rates = {k: prepost.get((p.code, k)) for k in ("3b", "4", "5")}
-        avail = {k: v for k, v in rates.items() if v and v["rate"] is not None}
-        worst = min(avail, key=lambda k: avail[k]["rate"]) if avail else None
-        wr = avail[worst]["rate"] if worst else None
-        when = decision_dates.get(worst) if worst else None
+        rates = {k: first.get((p.code, k)) for k in INDICATOR_MINISTRY}
+        avail = {k: v for k, v in rates.items() if v and v.get("delta_pct") is not None}
+        worst = min(avail, key=lambda k: avail[k]["delta_pct"]) if avail else None
+        wr = avail[worst]["delta_pct"] if worst else None
+        when = _parse_date(avail[worst]["decided_date"]) if worst else None
         auth, auth_note = authority_contribution(positions, p.politician_id, INDICATOR_MINISTRY.get(worst), when)
         st_all = pd.concat([by_politician(statements, p.politician_id), mentioning(statements, p.code)]).drop_duplicates("id")
         st = independent(st_all)
@@ -81,9 +82,7 @@ def compute_signals(prepost: dict, decision_dates: dict, panel: pd.DataFrame, st
                    "authority": auth, "reversal": 0.0}
         ungated = sum(WEIGHTS[k] * v for k, v in contrib.items())
         evidence = {
-            "indicators": {k: (None if v is None else {"pre_years": v["pre_years"], "pre_avg": v["pre"], "post_year": v["post_year"],
-                                                     "post": v["post"], "diff": v["diff"], "rate": v["rate"],
-                                                     "direction": v["direction"]}) for k, v in rates.items()},
+            "indicators": rates,
             "largest_decline_indicator": worst, "largest_decline_rate": wr,
             "authority_note": auth_note, "reversal_note": "未実装(第2フェーズ)",
             "statements": [{"date": r.date, "speaker": r.speaker, "venue": r.meeting, "url": r.source_url}

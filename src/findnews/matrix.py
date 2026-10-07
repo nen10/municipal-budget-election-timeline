@@ -7,9 +7,8 @@
      選挙区当選者の自治体内得票率と順位。
   A3 議員側: 選挙区当選者・比例復活者の氏名・政党、選挙後の役職(positions.csv、就任日)、所管省庁、
      指標 3〜5 の所管(総務省・国土交通省)との一致。
-軸 B: 指標 3(3 月分)・4・5 の選挙前後の方向(verify.py と同じ計算。各自治体を自分の過去とだけ比べる)。
-
-選挙前後の年度は投票日から決める(2026-02-08 では 選挙前 = 2023–2025、選挙後 = 2026、指標 3 は 2025 年度 3 月分)。
+軸 B: 指標 3(3 月分)・4・5 について、投票日の直後に来る最初の観測時点の「直前時点比の差分」の方向
+     (timeline.py の差分時系列。平均との比較はしない。各自治体を自分の過去とだけ比べる)。
 複数の選挙区にまたがる自治体は選挙区ごとに 1 行。軸 B は自治体全体の値で、部分ごとには分けられない。
 件数・割合は記述統計であり、有意性や因果を示すものではない。
 """
@@ -17,7 +16,6 @@
 from __future__ import annotations
 
 import csv
-import json
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date
@@ -28,8 +26,8 @@ from . import verify as V
 from .municipalities import TOCHIGI, normalize_name
 
 B_ORDER = ["増加", "横ばい", "減少", V.MISSING]
-B_KEYS = [("3b", "指標 3 特別交付税 3月分"), ("4", "指標 4 社総交・防安交(単独策定主体)"),
-          ("5", "指標 5 道路局箇所表(事業主体=市町)")]
+B_KEYS = [("tokko_march", "指標 3 特別交付税 3月分"), ("mlit_sole_grants", "指標 4 社総交・防安交(単独策定主体)"),
+          ("mlit_road", "指標 5 道路局箇所表(事業主体=市町)")]
 TARGET_MINISTRIES = {"総務省": "指標 3(特別交付税)", "国土交通省": "指標 4・5(社総交・防安交・道路局配分)"}
 DERIVED_A1 = ["勝者支持", "敗者支持(復活あり)", "敗者支持(復活なし)", "敗者支持(復活未確認)", "中立・非表明", "複数・不明", "未収集"]
 DERIVED_A2 = ["勝者トップ", "敗者トップ(復活あり)", "敗者トップ(復活なし)", "敗者トップ(復活未確認)"]
@@ -81,20 +79,6 @@ class Part:
 def _d(s: str) -> date:
     p = [int(x) for x in s.split("-")] + [1, 1]
     return date(*p[:3])
-
-
-def windows(conn, election_date: str) -> dict:
-    from .fetch.mlit_grants import RELEASES
-    ed = _d(election_date)
-    mlit = sorted(fy for fy, (_, dd, _) in RELEASES.items() if dd and _d(dd) > ed)
-    post45 = mlit[0] if mlit else None
-    tk = sorted(r[0] for r in conn.execute(
-        """SELECT DISTINCT fiscal_year FROM subsidy_allocations WHERE program_id='soumu_tokko' AND item_name='3月交付額'
-           AND decision_date > ?""", (election_date,)))
-    post3 = tk[0] if tk else None
-    pre = [post45 - 3, post45 - 2, post45 - 1] if post45 else []
-    pre3 = [post3 - 3, post3 - 2, post3 - 1] if post3 else []
-    return {"pre_years": pre, "post_year": post45, "pre_years_tokko": pre3, "post_year_tokko": post3}
 
 
 def _derive(result: str, prefix: str) -> str:
@@ -258,22 +242,18 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
     if not parts:
         raise SystemExit(f"選挙 {group} の結果が DB にない(findnews fetch tochigi-election を先に実行)")
     edate = next(iter(info.values()))["date"]
-    w = windows(conn, edate)
-    yrs = [y for y in w["pre_years"] + w["pre_years_tokko"] + [w["post_year"], w["post_year_tokko"]] if y]
-    period = (min(yrs + [cfg["verification"]["period"][0]]), max(yrs + [cfg["verification"]["period"][1]]))
     codes = sorted({p.code for p in parts})
-    obs = V.build(conn, codes, period)
-    pp = {}
-    for c in codes:
-        pp[(c, "3b")] = V.pre_post(obs[(c, "3b")], w["pre_years_tokko"], w["post_year_tokko"], th) if w["post_year_tokko"] else None
-        for k in ("4", "5"):
-            pp[(c, k)] = V.pre_post(obs[(c, k)], w["pre_years"], w["post_year"], th) if w["post_year"] else None
-    dirs = {k: {c: (pp[(c, k)]["direction"] if pp[(c, k)] else V.MISSING) for c in codes} for k, _ in B_KEYS}
+    from . import timeline
+    trows, _ = timeline.build(conn, pref_code, codes, [k for k, _ in B_KEYS], th)
+    pp = {(c, k): timeline.first_after(trows, c, k, edate) for c in codes for k, _ in B_KEYS}
+    dirs = {k: {c: (pp[(c, k)].direction if pp[(c, k)] else V.MISSING) for c in codes} for k, _ in B_KEYS}
+    firsts = {k: sorted({r.decided_date for (c, kk), r in pp.items() if kk == k and r}) for k, _ in B_KEYS}
 
     out_dir = Path(out_dir or config.PROCESSED_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
-    md_path = out_dir / f"matrix_tochigi_{group}.md"
-    csv_path = out_dir / f"matrix_tochigi_{group}.csv"
+    from .prefs import slug
+    md_path = out_dir / f"matrix_{slug(pref_code)}_{group}.md"
+    csv_path = out_dir / f"matrix_{slug(pref_code)}_{group}.csv"
     n_unc = sum(1 for p in parts if p.a1_status == "未収集")
 
     L = [f"# 国政選挙との分離マトリックス: {group}(投票日 {edate}、都道府県コード {pref_code})", "",
@@ -282,9 +262,9 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
          "- A2: 県選管の開票区別得票(確定値)から機械的に算出。得票率 = 候補の得票 ÷ 当該自治体(選挙区内の部分)の候補者得票合計。",
          "- 候補の政党表示は県選管の候補者届出状況公表票による(「◯◯公認」= 政党届出、「無所属」= 本人届出)。他党の推薦は未収集。",
          "- 比例復活は data/manual/election_outcomes.csv に出典つきで登録したもの、重複立候補なしの落選者は「落選」。",
-         f"- 軸 B: 各自治体を自分の過去と比べた方向(閾値 ±{th * 100:.1f}%)。指標 4・5 は {w['pre_years']} 年度平均 vs "
-         f"{w['post_year']} 年度、指標 3 は {w['pre_years_tokko']} 年度の 3 月分平均 vs {w['post_year_tokko']} 年度 3 月分。"
-         "他自治体を基準にした正規化はしていない。",
+         f"- 軸 B: 投票日({edate})の直後に来る最初の観測時点の、直前の観測時点に対する差分の方向(閾値 ±{th * 100:.1f}%。"
+         "平均との比較はしていない。他自治体を基準にした正規化もしていない)。使った観測時点の decided_date: "
+         + "; ".join(f"{lab} {', '.join(firsts[k]) or '該当なし'}" for k, lab in B_KEYS) + "。",
          "- 「減少の割合」は行内の件数の比(記述統計)。有意性や因果を示すものではない。", ""]
 
     L += ["## A3 選挙区の当選者・比例復活者と選挙後の役職", ""]
@@ -320,8 +300,7 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
              f"{p.gap_pt:.1f}" if p.gap_pt is not None else "—",
              f"{_pct(p.winner_share)}({p.winner_rank}位)" if p.winner_rank else "—"]
         for key, _ in B_KEYS:
-            x = pp[(p.code, key)]
-            r.append(f"{x['direction']}({V._pct(x['rate'])}; 前 {V._n(x['pre'])} → 後 {V._n(x['post'])})" if x else V.MISSING)
+            r.append(_b_text(pp[(p.code, key)]))
         rows.append(r)
     L += [_t(["自治体", "区", "首長", "首長の党派", "A1 行見出し", "支持候補", "支持の形態", "1位候補 得票率", "2位候補 得票率",
               "差(pt)", "当選者の得票率(順位)", "指標3", "指標4", "指標5"], rows), ""]
@@ -349,8 +328,9 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
                 "A3_winner_name", "A3_winner_party", "A3_winner_positions", "A3_revived_names", "A3_revived_parties",
                 "A3_revived_positions"]
         for key, _ in B_KEYS:
-            head += [f"ind{key}_pre_avg", f"ind{key}_post", f"ind{key}_diff", f"ind{key}_rate", f"ind{key}_direction"]
-        head += ["pre_years_ind45", "post_year_ind45", "pre_years_ind3", "post_year_ind3", "threshold"]
+            head += [f"{key}_period_start", f"{key}_decided_date", f"{key}_prev_value", f"{key}_value", f"{key}_delta",
+                     f"{key}_delta_pct", f"{key}_direction", f"{key}_event_ids"]
+        head += ["threshold"]
         wr.writerow(head)
         for p in parts:
             di = info[p.district]
@@ -372,8 +352,20 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
                    " / ".join(a3_text(conn, r, edate) for r in di["revived"])]
             for key, _ in B_KEYS:
                 x = pp[(p.code, key)]
-                row += ([x["pre"], x["post"], x["diff"], None if x["rate"] is None else round(x["rate"], 4), x["direction"]]
-                        if x else ["", "", "", "", V.MISSING])
-            row += [json.dumps(w["pre_years"]), w["post_year"], json.dumps(w["pre_years_tokko"]), w["post_year_tokko"], th]
+                row += ([x.period_start, x.decided_date, None if x.delta is None else x.value - x.delta, x.value, x.delta,
+                         None if x.delta_pct is None else round(x.delta_pct, 4), x.direction, ";".join(x.event_ids)]
+                        if x else ["", "", "", "", "", "", V.MISSING, ""])
+            row += [th]
             wr.writerow(["" if v is None else v for v in row])
-    return {"md": str(md_path), "csv": str(csv_path), "rows": len(parts), "a1_uncollected": n_unc, "windows": w}
+    return {"md": str(md_path), "csv": str(csv_path), "rows": len(parts), "a1_uncollected": n_unc,
+            "first_post_election_decided": firsts}
+
+
+def _b_text(x) -> str:
+    if x is None:
+        return f"{V.MISSING}(投票日後の観測時点なし)"
+    if x.value is None:
+        return f"{V.MISSING}({x.missing_reason or ''}; {x.decided_date})"
+    prev = None if x.delta is None else x.value - x.delta
+    return (f"{x.direction}({V._pct(x.delta_pct)}; 直前 {V._n(prev)} → {V._n(x.value)}、{x.period_start[:4]}年度分、"
+            f"decided {x.decided_date})")

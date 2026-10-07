@@ -7,7 +7,6 @@ import json
 import sqlite3
 
 from .. import verify as V
-from ..municipalities import TOCHIGI
 from .score import WEIGHTS
 from .statements import by_politician, excerpt, mentioning
 
@@ -16,7 +15,8 @@ DISCLAIMER = (
     "他自治体との比較はしていません。増減は事業サイクル・災害復旧・計画の統廃合・申請の有無など多くの理由で生じます。"
     "ここに載ることは、いかなる個人・団体の不正や意図を示すものでもありません。"
 )
-LABEL = {"3b": "指標 3 特別交付税 3月分", "4": "指標 4 社総交・防安交(単独策定主体)", "5": "指標 5 道路局箇所表(事業主体=市町)"}
+LABEL = {"tokko_march": "指標 3 特別交付税 3月分", "mlit_sole_grants": "指標 4 社総交・防安交(単独策定主体)",
+         "mlit_road": "指標 5 道路局箇所表(事業主体=市町)"}
 
 
 def _t(headers, rows):
@@ -25,11 +25,12 @@ def _t(headers, rows):
     return "\n".join(out)
 
 
-def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, st, th) -> str:
+def render(conn: sqlite3.Connection, run_id, pref_code, group, edate, sig, st, th, names) -> str:
+    TOCHIGI = names  # noqa: N806
     L = [f"# 要検証シグナル レポート(都道府県コード {pref_code}、選挙 {group})", "", f"run_id: `{run_id}`", "", DISCLAIMER, ""]
-    if w:
-        L += [f"指標 4・5: {w['pre_years']} 年度平均 vs {w['post_year']} 年度。指標 3: {w['pre_years_tokko']} 年度の 3 月分平均 vs "
-              f"{w['post_year_tokko']} 年度 3 月分。方向の閾値 ±{th * 100:.1f}%。", ""]
+    if edate:
+        L += [f"各指標について、投票日({edate})の直後に来る最初の観測時点の、直前の観測時点に対する差分を使う"
+              f"(平均との比較はしない)。方向の閾値 ±{th * 100:.1f}%。", ""]
     L += ["## 1. 寄与内訳つきスコア", "",
           "重み: " + "、".join(f"{k} {v}" for k, v in WEIGHTS.items()) +
           "。score は当該議員が当該自治体で最多得票でなかった場合のみ出力(それ以外は 0、ゲート前の値は score_ungated)。"
@@ -38,8 +39,11 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
         rows = []
         for r in sig.sort_values(["score", "score_ungated"], ascending=False).itertuples():
             ev = json.loads(r.evidence)
-            ind = "; ".join(f"{LABEL[k]}: " + (f"{V._n(v['pre_avg'])}→{V._n(v['post'])} ({V._pct(v['rate'])}, {v['direction']})"
-                                               if v else V.MISSING) for k, v in ev["indicators"].items())
+            ind = "; ".join(f"{LABEL[k]}: " + (f"{v['period_start'][:4]}年度分 decided {v['decided_date']}: "
+                                               f"直前 {V._n(v['prev_value'])}→{V._n(v['value'])} ({V._pct(v['delta_pct'])}, {v['direction']})"
+                                               if v and v.get('value') is not None else
+                                               f"{V.MISSING}({(v or {}).get('missing_reason') or '投票日後の観測時点なし'})")
+                            for k, v in ev["indicators"].items())
             rows.append([TOCHIGI.get(r.municipality_code), f"{r.candidate_name}({r.nomination}、{r.result_label})",
                          f"{r.candidate_share:.1%}({r.candidate_rank}位)", f"{r.top_candidate}({r.top_nomination}) {r.top_share:.1%}",
                          f"{r.score:.3f}", f"{r.score_ungated:.3f}",
@@ -48,7 +52,7 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
                          + f" / 権限 {r.c_authority:.2f} / 反転 {r.c_reversal:.2f}",
                          ind])
         L += [_t(["自治体", "議員(政党、結果)", "議員の得票率(順位)", "自治体内 1 位", "score", "score_ungated", "寄与(0〜1)",
-                  "指標(選挙前平均→選挙後)"], rows), ""]
+                  "指標(投票日後最初の観測時点の直前時点比)"], rows), ""]
         L += ["権限の判定メモ:", ""] + sorted({f"- {r.politician_id}: {json.loads(r.evidence)['authority_note']}"
                                             for r in sig.itertuples()}) + [""]
     else:
@@ -97,7 +101,7 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
             L.append(f"- {r.date} {r.speaker}({r.speaker_group or ''}) {r.meeting} [{r.matched_keywords}] {r.source_url}")
         L.append("")
     L += ["## 3. 注意", "",
-          "- 各自治体の値は verify(DESIGN.md 第10節)と同じ計算。全年度の表は data/processed/verification_tochigi.md。",
+          "- 観測時点ごとの差分と政局イベントの対応は data/processed/timeline_<都道府県コード>/。",
           "- 町の特別交付税(指標 3)は報道発表に個別額がなく未取得。指標 4 は単独策定主体の計画のみ、指標 5 は事業主体が当該市町の箇所のみ。",
           "- キーワードの由来は config/keywords.yaml。由来事例への一致は上記のとおり注記し、スコアに数えていない。", ""]
     return "\n".join(L) + "\n"

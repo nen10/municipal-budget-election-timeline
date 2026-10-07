@@ -41,7 +41,11 @@ def list_sources(fiscal_years: list[int]) -> list[dict]:
     for fy in fiscal_years:
         for kind, yymm in (("12月", f"{fy % 100:02d}12"), ("3月", f"{(fy + 1) % 100:02d}03")):
             idx = ARCHIVE.format(yymm=yymm)
-            soup = BeautifulSoup(http.get_html(idx), "html.parser")
+            try:
+                soup = BeautifulSoup(http.get_html(idx), "html.parser")
+            except Exception as e:  # noqa: BLE001  (未来の月など。未発表として記録)
+                out.append({"fiscal_year": fy, "kind": kind, "url": None, "error": f"報道資料一覧を取得できない(未発表の可能性): {idx} {e!r}"})
+                continue
             rel = None
             for a in soup.find_all("a"):
                 t = a.get_text(strip=True)

@@ -14,9 +14,9 @@ def test_contribution_functions():
     assert score.statement_contribution(5) == 1.0
 
 
-def _pp(rate):
-    return {"pre_years": [2023, 2024, 2025], "pre": 100.0, "post_year": 2026, "post": 100 * (1 + rate),
-            "diff": 100 * rate, "rate": rate, "direction": "減少" if rate <= -0.05 else "横ばい"}
+def _fd(pct, decided="2026-04-07"):
+    return {"period_start": "2026-04-01", "decided_date": decided, "prev_value": 100.0, "value": 100 * (1 + pct),
+            "delta": 100 * pct, "delta_pct": pct, "direction": "減少" if pct <= -0.05 else "横ばい", "event_ids": []}
 
 
 def _panel(opposed):
@@ -26,17 +26,17 @@ def _panel(opposed):
                           "margin_share": -0.3, "opposed_locally": opposed, "source_url": "u"}])
 
 
-def test_compute_signals_and_gate():
-    prepost = {("A", "3b"): _pp(0.02), ("A", "4"): None, ("A", "5"): _pp(-0.6)}
-    dd = {"3b": date(2026, 3, 17), "4": date(2026, 4, 7), "5": date(2026, 4, 7)}
-    st = pd.DataFrame(columns=["id", "politician_id", "target_municipalities", "source_url", "date", "speaker", "meeting"])
+def test_compute_signals_uses_first_post_election_diff_and_gate():
+    first = {("A", "tokko_march"): _fd(0.02, "2026-03-17"), ("A", "mlit_sole_grants"): None, ("A", "mlit_road"): _fd(-0.6)}
+    st = pd.DataFrame(columns=["id", "politician_id", "target_municipalities", "source_url", "date", "speaker", "meeting",
+                               "independent_keywords", "origin_note"])
     pos = pd.DataFrame([{"politician_id": "p", "title": "国土交通大臣", "ministry": "国土交通省",
                          "start_date": "2025-10-21", "end_date": None, "verification": "test"}])
-    r = score.compute_signals(prepost, dd, _panel(True), st, pos).iloc[0]
+    r = score.compute_signals(first, _panel(True), st, pos).iloc[0]
     assert abs(r.c_own_decline - 0.6) < 1e-9
-    assert r.c_authority == 1.0          # 指標 5 の所管(国交省)と一致し、2026-04-07 に在任
+    assert r.c_authority == 1.0          # 指標 5 の所管(国交省)と一致し、decided 2026-04-07 に在任
     assert abs(r.score - (0.6 * 0.6 + 0.1)) < 1e-9
-    g = score.compute_signals(prepost, dd, _panel(False), st, pos).iloc[0]
+    g = score.compute_signals(first, _panel(False), st, pos).iloc[0]
     assert g.score == 0 and g.score_ungated > 0
 
 

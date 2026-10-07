@@ -1,4 +1,4 @@
-"""第10節「栃木県全市町の時系列記録」(`findnews verify tochigi`)。
+"""第10節「都道府県内全市区町村の時系列記録」(`findnews verify --pref 09`、別名 `findnews verify tochigi`)。
 
 方針(DESIGN.md 10.1):
   - 各自治体を自分自身の過去とだけ比べる。他自治体を基準にした正規化・順位・ピア群・z スコアは行わない。
@@ -22,7 +22,8 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from . import settings as settings_mod
-from .municipalities import TOCHIGI, normalize_name
+from .municipalities import master, normalize_name
+from .prefs import name as pref_name
 
 MISSING = "未取得"
 UNDEF = "未定義"
@@ -91,7 +92,7 @@ def build(conn: sqlite3.Connection, codes: list[str], period: tuple[int, int]) -
                 v = tk.get((c, y, item))
                 if v is not None:
                     out[(c, key)][y] = Obs(v)
-                elif not TOCHIGI.get(c, "").endswith("市"):
+                elif not _NAMES.get(c, "").endswith("市"):
                     out[(c, key)][y] = Obs(None, reason="報道発表に町の個別額なし")
                 elif y not in yrs_item:
                     out[(c, key)][y] = Obs(None, reason="未発表" if y not in tk_years or y >= max(tk_years) else "資料未取得")
@@ -161,22 +162,6 @@ def max_decline(series: dict[int, Obs]) -> dict | None:
             "decline": dec, "rate": (dec / vals[ymax]) if vals[ymax] else None}
 
 
-def pre_post(series: dict[int, Obs], pre_years, post_year, threshold) -> dict:
-    pre_vals = [series[y].value for y in pre_years if y in series]
-    post = series.get(post_year)
-    res = {"pre_years": list(pre_years), "post_year": post_year, "pre": None, "post": None,
-           "diff": None, "rate": None, "direction": MISSING}
-    if len(pre_vals) == len(pre_years) and all(v is not None for v in pre_vals):
-        res["pre"] = sum(pre_vals) / len(pre_vals)
-    if post is not None and post.value is not None:
-        res["post"] = post.value
-    if res["pre"] is not None and res["post"] is not None:
-        res["diff"] = res["post"] - res["pre"]
-        res["rate"] = res["diff"] / res["pre"] if res["pre"] != 0 else None
-    res["direction"] = direction(res["rate"], threshold)
-    return res
-
-
 _PERIOD_RE = re.compile(r"[（(]?(第[0-9０-９一二三四五六七八九十]+期|重点計画|重点)[）)]?|[0-9０-９]{4}$")
 
 
@@ -216,26 +201,30 @@ class Result:
     threshold: float
     obs: dict
     pop: dict
-    prepost: dict          # (code, key) -> pre_post dict  (key in 3b, 3c, 4, 5)
+    first_diffs: dict      # (election_group, election_date, code, indicator_id) -> timeline.Row(投票日後最初の観測時点)
+    names: dict
     item_rows: list[dict]  # 指標 4, 5 の事業別分類
     settings: dict
 
 
 def compute(conn: sqlite3.Connection, pref_code: str = "09", cfg: dict | None = None) -> Result:
+    global _NAMES
     cfg = cfg or settings_mod.load()
     v = cfg["verification"]
     period = tuple(v["period"])
     th = float(v["direction_threshold"])
-    codes = sorted(c for c in TOCHIGI if c.startswith(pref_code))
+    _NAMES = master(pref_code)
+    codes = sorted(_NAMES)
     obs = build(conn, codes, period)
     pop = population(conn, codes, period)
-    prepost = {}
-    pre = v["pre_years"]
-    for c in codes:
-        for key in ("3a", "3b", "3c"):
-            prepost[(c, key)] = pre_post(obs[(c, key)], v["pre_years_tokko"], v["post_year_tokko"], th)
-        for key in ("4", "5"):
-            prepost[(c, key)] = pre_post(obs[(c, key)], pre, v["post_year"], th)
+    from . import timeline
+    trows, _ = timeline.build(conn, pref_code, codes, list(FIRST_DIFF_INDICATORS), th)
+    first = {}
+    for g, d in conn.execute("""SELECT DISTINCT substr(election_id, 1, instr(election_id, '_smd_') - 1), election_date
+                                FROM elections WHERE pref_code=? ORDER BY election_date DESC""", (pref_code,)):
+        for c in codes:
+            for ind in FIRST_DIFF_INDICATORS:
+                first[(g, d, c, ind)] = timeline.first_after(trows, c, ind, d)
     item_rows = []
     for key in ("4", "5"):
         for c in codes:
@@ -244,8 +233,14 @@ def compute(conn: sqlite3.Connection, pref_code: str = "09", cfg: dict | None = 
                 if s[y].value is None or s[y - 1].value is None:
                     continue
                 for r in classify_items(s[y - 1].items, s[y].items):
-                    item_rows.append({"indicator": key, "code": c, "name": TOCHIGI[c], "fiscal_year": y, **r})
-    return Result(codes, period, th, obs, pop, prepost, item_rows, cfg)
+                    item_rows.append({"indicator": key, "code": c, "name": _NAMES[c], "fiscal_year": y, **r})
+    return Result(codes=codes, period=period, threshold=th, obs=obs, pop=pop, first_diffs=first, names=_NAMES,
+                  item_rows=item_rows, settings=cfg)
+
+
+FIRST_DIFF_INDICATORS = {"tokko_dec": "3a 特別交付税 12月分", "tokko_march": "3b 特別交付税 3月分",
+                         "mlit_sole_grants": "4 社総交・防安交 単独策定主体", "mlit_road": "5 道路局箇所表 事業主体=市町"}
+_NAMES: dict[str, str] = {}
 
 
 # ---------------------------------------------------------------- 出力
@@ -274,7 +269,7 @@ def sources_table(conn) -> list[list[str]]:
         ("決算カード(指標 1, 2、参考人口 FY2020–2024)", "SELECT DISTINCT fiscal_year, source_url, retrieved_at FROM municipality_fiscal WHERE source='soumu_card' AND source_url IS NOT NULL"),
         ("住民基本台帳人口(参考人口 FY2025)", "SELECT DISTINCT fiscal_year, source_url, retrieved_at FROM municipality_fiscal WHERE source='soumu_jumin'"),
         ("特別交付税 報道発表(指標 3)", "SELECT DISTINCT fiscal_year || ' ' || CASE WHEN item_name='12月交付額' THEN '12月' ELSE '3月' END, source_url, retrieved_at FROM subsidy_allocations WHERE program_id='soumu_tokko'"),
-        ("国交省 事業実施箇所 栃木県 PDF(指標 4, 5)", "SELECT DISTINCT fiscal_year, source_url, retrieved_at FROM subsidy_allocations WHERE program_id IN ('mlit_shasoukou','mlit_bouan','mlit_road')"),
+        ("国交省 事業実施箇所 都道府県別 PDF(指標 4, 5)", "SELECT DISTINCT fiscal_year, source_url, retrieved_at FROM subsidy_allocations WHERE program_id IN ('mlit_shasoukou','mlit_bouan','mlit_road')"),
     ]
     for label, sql in q:
         for r in sorted(set(tuple(x) for x in conn.execute(sql).fetchall())):
@@ -282,16 +277,17 @@ def sources_table(conn) -> list[list[str]]:
     return rows
 
 
-def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県") -> str:
+def render(conn: sqlite3.Connection, res: Result, title_pref: str | None = None) -> str:
+    TOCHIGI = res.names  # noqa: N806  (表示名の辞書。名前は互換のため)
+    title_pref = title_pref or pref_name(res.codes[0][:2])
     th = res.threshold
     years = list(range(res.period[0], res.period[1] + 1))
     v = res.settings["verification"]
     L = [f"# {title_pref} 全市町の補助金・交付金の時系列記録(DESIGN.md 第10節)", "",
          f"- 対象: {len(res.codes)} 市町 / 対象年度: {res.period[0]}–{res.period[1]}(西暦の会計年度)",
          f"- 増減方向の閾値: ±{th * 100:.1f}%(設定ファイル: `{res.settings['_path']}`)",
-         f"- 選挙前後: 指標 4・5 は {v['pre_years'][0]}–{v['pre_years'][-1]} 年度平均 → {v['post_year']} 年度当初配分、"
-         f"指標 3 は {v['pre_years_tokko'][0]}–{v['pre_years_tokko'][-1]} 年度の各年度分の平均 → {v['post_year_tokko']} 年度分"
-         f"(3 月分は 2026-03 交付で、2026-02-08 投票の衆院選の後に決定)",
+         "- 選挙との関係は、投票日の直後に来る最初の観測時点の「直前時点比の差分」で示す(第4節。平均との比較はしない)。"
+         "観測時点ごとの差分と政局イベントの対応は data/processed/timeline_<都道府県コード>/ を参照。",
          "- 各市町は自分自身の過去の値とだけ比べている。他市町を基準にした正規化・順位・z スコアは算出していない。",
          "- 金額の単位は千円。未取得は推定せず「未取得」、前年値が 0 または未取得の変化率は「未定義」。", ""]
 
@@ -337,35 +333,34 @@ def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県")
                              m["latest_year"], _n(m["decline"]), _pct(-m["rate"] if m["rate"] else 0.0) if m["rate"] is not None else UNDEF])
     L += [_t(["市町", "指標", "最大値", "最大の年度", "最新値", "最新年度", "最大値からの減少額", "最大値からの変化率"], rows), ""]
 
-    # 選挙前後
-    L += ["## 4. 選挙前後の変化(指標 3〜5)", "",
-          f"指標 4・5: 選挙前 = {v['pre_years'][0]}–{v['pre_years'][-1]} 年度平均、選挙後 = {v['post_year']} 年度。",
-          f"指標 3: 選挙前 = {v['pre_years_tokko'][0]}–{v['pre_years_tokko'][-1]} 年度の各年度分の平均、"
-          f"選挙後 = {v['post_year_tokko']} 年度分(3a は 12 月分で選挙前の 2025-12 に決定、3c は 12 月分と 3 月分の合計で、"
-          "いずれも参考。軸 B に使うのは 3b の 3 月分)。", ""]
-    rows = []
-    for c in res.codes:
-        for key in ("3a", "3b", "3c", "4", "5"):
-            p = res.prepost[(c, key)]
-            cnt = ""
-            if IND[key].has_count:
-                s = res.obs[(c, key)]
-                pc = [s[y].count for y in v["pre_years"] if s[y].count is not None]
-                cnt = (f"{sum(pc) / len(pc):.1f} → {s[v['post_year']].count}"
-                       if len(pc) == len(v["pre_years"]) and s[v["post_year"]].count is not None else MISSING)
-            rows.append([TOCHIGI[c], f"{key} {IND[key].label}", f"{p['pre_years'][0]}–{p['pre_years'][-1]}", _n(p["pre"]),
-                         p["post_year"], _n(p["post"]),
-                         _n(p["diff"]) if p["diff"] is not None else UNDEF, _pct(p["rate"]), p["direction"], cnt or "—"])
-    L += [_t(["市町", "指標", "選挙前の年度", "選挙前平均", "選挙後の年度", "選挙後", "差額", "変化率", "方向", "件数(前平均→後)"], rows), ""]
-    # 方向の集計(件数のみ)
-    L += ["方向別の市町数(各市町を自分の過去と比べた結果を数えたもの):", ""]
-    rows = []
-    for key in ("3b", "4", "5"):
-        cnt = {}
+    # 選挙後最初の差分
+    L += ["## 4. 選挙後最初の差分(指標 3〜5)", "",
+          "投票日の直後に来る最初の観測時点(decided_date が投票日より後)の値と、その直前の観測時点の値の差。"
+          "指標 3 は 12 月分・3 月分をそれぞれの系列として扱う(12 月分の直前は前年度の 12 月分)。", ""]
+    elections = sorted({(k[0], k[1]) for k in res.first_diffs}, key=lambda x: x[1], reverse=True)
+    for g, d in elections:
+        L += [f"### {g}(投票日 {d})", ""]
+        rows, cnt = [], {}
         for c in res.codes:
-            cnt[res.prepost[(c, key)]["direction"]] = cnt.get(res.prepost[(c, key)]["direction"], 0) + 1
-        rows.append([f"{key} {IND[key].label}"] + [cnt.get(k, 0) for k in ("増加", "横ばい", "減少", MISSING)])
-    L += [_t(["指標", "増加", "横ばい", "減少", MISSING], rows), ""]
+            for ind, lab in FIRST_DIFF_INDICATORS.items():
+                r = res.first_diffs[(g, d, c, ind)]
+                if r is None:
+                    rows.append([TOCHIGI[c], lab, "—", "—", "—", "—", "—", "—", f"{MISSING}(投票日後の観測時点なし)"])
+                    dirn = MISSING
+                else:
+                    prev = None if r.delta is None else r.value - r.delta
+                    val = _n(r.value) if r.value is not None else f"{MISSING}({r.missing_reason})"
+                    rows.append([TOCHIGI[c], lab, f"{r.period_start[:4]}年度分", (r.decided_date or "") + ("(代用)" if r.decided_date_is_proxy else ""),
+                                 _n(prev) if prev is not None else MISSING, val, _n(r.delta) if r.delta is not None else UNDEF,
+                                 _pct(r.delta_pct), r.direction])
+                    dirn = r.direction
+                cnt.setdefault(ind, {}).setdefault(dirn, 0)
+                cnt[ind][dirn] += 1
+        L += [_t(["市町", "指標", "観測時点", "decided_date", "直前の値", "値", "差額", "変化率", "方向"], rows), ""]
+        L += ["方向別の市町数(各市町を自分の直前の観測時点と比べた結果を数えたもの):", "",
+              _t(["指標", "増加", "横ばい", "減少", MISSING],
+                 [[FIRST_DIFF_INDICATORS[i]] + [cnt.get(i, {}).get(k, 0) for k in ("増加", "横ばい", "減少", MISSING)]
+                  for i in FIRST_DIFF_INDICATORS]), ""]
 
     # 事業別
     L += ["## 5. 事業別の分類(指標 4・5、前年度との事業名突合)", "",
@@ -398,6 +393,7 @@ def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県")
 
 
 def notes(conn, res: Result) -> list[str]:
+    TOCHIGI = res.names  # noqa: N806
     L = []
     # 災害復旧
     rows = [[TOCHIGI[r[0]], r[1], _n(r[2])] for r in conn.execute(
@@ -454,7 +450,7 @@ def notes(conn, res: Result) -> list[str]:
               "- 国交省の共同計画(計画策定主体が複数)は自治体別内訳がないため指標 4 に含めていない。",
               "- 道路局箇所表のうち国道・県道・都市計画道路の補助事業は事業主体の記載がなく、指標 5 に含めていない"
               "(路線名が「(市)」「(町)」の行は道路管理者である当該市町を事業主体とした)。",
-              "- 令和7年度(FY2025)の栃木県 PDF の道路局セクションには地方創生道整備推進交付金(市町村道分)の表がない。", ""]
+              "- 令和7年度(FY2025)の栃木県 PDF の道路局セクションには地方創生道整備推進交付金(市町村道分)の表がない(栃木県で確認)。", ""]
     return L
 
 
