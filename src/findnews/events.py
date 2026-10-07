@@ -41,11 +41,12 @@ def generate(conn: sqlite3.Connection, pref_code: str) -> dict:
                WHERE election_id=? GROUP BY candidate_name ORDER BY v DESC""", (e["election_id"],)).fetchall()
         win = [c for c in cands if c["res"] == "選挙区当選"]
         rev = [c for c in cands if c["res"] == "落選・比例復活"]
-        summary = (f"{e['district']} 衆院選投票。選挙区当選: " + "、".join(f"{c['candidate_name']}({c['nom']})" for c in win)
+        label = "参院選投票" if (e["kind"] or "").startswith("sangiin") else "衆院選投票"
+        summary = (f"{e['district']} {label}。選挙区当選: " + "、".join(f"{c['candidate_name']}({c['nom']})" for c in win)
                    + ("。落選・比例復活: " + "、".join(f"{c['candidate_name']}({c['nom']})" for c in rev) if rev else "")
                    + "。候補者: " + "、".join(f"{c['candidate_name']}({c['nom']}、{int(c['v']):,}票)" for c in cands))
         _put(conn, {"event_id": f"gen-election-{e['election_id']}", "date": e["election_date"], "date_precision": "day",
-                    "event_type": "衆院選投票", "scope": "district", "pref_code": pref_code, "district": e["district"],
+                    "event_type": label, "scope": "district", "pref_code": pref_code, "district": e["district"],
                     "actor_name": "、".join(c["candidate_name"] for c in win), "actor_party": "、".join(c["nom"] or "" for c in win),
                     "actor_role": "選挙区当選", "summary": summary, "source_url": e["source_url"],
                     "outlet": "都道府県選挙管理委員会", "source_date": e["election_date"], "generated_by": "tochigi_election"

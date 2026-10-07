@@ -23,7 +23,8 @@ REQUIRED = {
                          "evidence_date", "quote", "collection_status"],
     "subsidy_programs.csv": ["program_id", "name", "ministry", "discretion_level", "source_url"],
     "statements.csv": ["speaker", "date", "venue", "quote", "outlet", "source_url"],
-    "requests.csv": ["municipality_code", "fiscal_year", "project", "result", "source_url"],
+    "requests.csv": ["municipality_code", "record_type", "request_date", "recipient", "program", "project_name",
+                     "result", "result_date", "source_url", "quote"],
 }
 
 
@@ -114,15 +115,9 @@ def load_all(conn: sqlite3.Connection, manual_dir: Path | None = None) -> dict:
              r.get("granularity"), r.get("note"), r.get("source_url"), r.get("retrieved_at")))
     counts["subsidy_programs"] = len(rows)
 
-    conn.execute("DELETE FROM requests")
-    rows = read_csv(d / "requests.csv")
-    for r in rows:
-        conn.execute(
-            """INSERT INTO requests(municipality_code, fiscal_year, project, result, note, source_url, retrieved_at)
-               VALUES (?,?,?,?,?,?,?)""",
-            (r.get("municipality_code"), r.get("fiscal_year"), r.get("project"), r.get("result"), r.get("note"),
-             r.get("source_url"), r.get("retrieved_at")))
-    counts["requests"] = len(rows)
+    from .requests import load_manual
+    counts["requests"] = load_manual(conn, d)
+
 
     # 報道等で報じられた発言(原文の引用文。要約しない)
     import hashlib

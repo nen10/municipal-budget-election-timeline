@@ -11,7 +11,7 @@
 {%- endmacro %}
 
 {% macro legend() -%}
-<div class="legend" aria-hidden="true"><span><span class="key up"></span>増加(直前比 +閾値以上)</span><span><span class="key down"></span>減少(−閾値以下)</span><span><span class="key flat"></span>横ばい・未取得</span><span>灰色の縦線と番号: 政局イベント</span></div>
+<div class="legend" aria-hidden="true"><span><span class="key up"></span>増加(直前比 +閾値以上)</span><span><span class="key down"></span>減少(−閾値以下)</span><span><span class="key flat"></span>横ばい・未取得</span><span>灰色の縦線 E1…: 国政選挙の投票日</span><span><span class="sq"></span>申請(計画提出など)</span><span><span class="dia"></span>結果(採択など)</span></div>
 {%- endmacro %}
 
 {% macro event_who(e) -%}

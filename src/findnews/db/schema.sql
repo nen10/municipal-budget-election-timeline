@@ -145,13 +145,43 @@ CREATE INDEX IF NOT EXISTS ix_alloc_muni ON subsidy_allocations(municipality_cod
 
 CREATE TABLE IF NOT EXISTS requests (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    pref_code       TEXT,
     municipality_code TEXT,
+    record_type     TEXT NOT NULL,             -- 申請(計画提出・交付申請)/ 要望 / 結果
+    request_date    TEXT,                      -- 申請日・要望日(不明なら NULL)
+    date_precision  TEXT,                      -- day / month / fiscal_year(年度のみ判明)
     fiscal_year     INTEGER,
-    project         TEXT,
-    result          TEXT,                      -- 採択 / 不採択 / 減額 / 不明
+    recipient       TEXT,                      -- 申請先・要望先(国土交通大臣、栃木県、議員名など)
+    program         TEXT,                      -- 制度名(社会資本整備総合交付金、防災・安全交付金、国への要望書など)
+    project_name    TEXT,                      -- 事業名・計画名
+    project_key     TEXT,                      -- 同じ事業を結ぶキー(計画名を正規化)
+    planners        TEXT,                      -- 計画策定主体(共同計画は複数)
+    attribution     TEXT,                      -- sole / joint
+    plan_period     TEXT,
+    requested_amount_thousand_yen REAL,        -- 要望額(計画書の全体事業費など。性質は amount_note)
+    amount_note     TEXT,
+    result          TEXT,                      -- 採択 / 一部採択 / 不採択 / 不明
+    result_date     TEXT,                      -- 結果判明日
+    result_amount_thousand_yen REAL,
+    indicator_link  TEXT,                      -- グラフに載せる指標(mlit_sole_grants / mlit_road / all / NULL)
+    collection_source TEXT,                    -- mlit_jigo_hyoka / mlit_haibun / municipal_plan_pdf / municipal_page / manual
+    quote           TEXT,                      -- 出典の原文(表の行など)
     note            TEXT,
     source_url      TEXT,
-    retrieved_at    TEXT
+    retrieved_at    TEXT,
+    generated_by    TEXT
+);
+
+-- 申請・要望の収集状況(市町 × 収集元)。記録がないことと、探していないことを区別する
+CREATE TABLE IF NOT EXISTS request_status (
+    municipality_code TEXT NOT NULL,
+    collection_source TEXT NOT NULL,
+    status          TEXT NOT NULL,             -- 収集済 / 未収集 / 未取得(非公開) / 該当なし
+    note            TEXT,
+    checked_urls    TEXT,
+    source_url      TEXT,
+    retrieved_at    TEXT,
+    PRIMARY KEY (municipality_code, collection_source)
 );
 
 CREATE TABLE IF NOT EXISTS statements (

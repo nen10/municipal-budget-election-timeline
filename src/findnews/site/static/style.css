@@ -46,6 +46,8 @@ h1 { font-size: 1.85rem; line-height: 1.35; font-weight: 700; margin: 4px 0 8px;
 .legend .key.up { border-color: var(--accent); }
 .legend .key.down { border-color: var(--down); }
 .legend .key.flat { border-color: var(--flat); }
+.legend .sq { display: inline-block; width: 8px; height: 8px; border: 1.5px solid var(--ink-2); margin-right: 6px; vertical-align: middle; }
+.legend .dia { display: inline-block; width: 8px; height: 8px; background: var(--ink-2); transform: rotate(45deg); margin-right: 6px; vertical-align: middle; }
 h2 { font-size: 1.15rem; font-weight: 600; margin: 32px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--rule); }
 h3 { font-size: 1rem; font-weight: 600; margin: 24px 0 6px; }
 p, li { max-width: 72em; }
@@ -97,6 +99,9 @@ figure.chart figcaption { font-size: 0.85rem; color: var(--ink-2); max-width: 72
 .chart .event { stroke: var(--muted); stroke-width: 1; }
 .chart .event-hit { stroke: transparent; stroke-width: 12; }
 .chart .event-label { fill: var(--muted); font: 10px var(--sans); }
+.chart .req-apply { fill: var(--surface); stroke: var(--ink-2); stroke-width: 1.5; }
+.chart .req-result { fill: var(--ink-2); }
+.chart .req-link { stroke: var(--muted); stroke-width: 1; }
 .chart .crosshair { stroke: var(--ink-2); stroke-width: 1; }
 .tooltip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--rule); padding: 6px 8px; font-size: 0.82rem; max-width: 28em; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
 .tooltip strong { font-family: var(--mono); }

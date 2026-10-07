@@ -22,7 +22,6 @@ from ..sources.registry import INDICATORS, status_for_pref
 
 HERE = Path(__file__).parent
 MINUS = "−"
-CHART_EXCLUDED_TYPES = {"予算配分公表"}   # 観測時点そのものと同じ日付になるため、グラフの縦線からは外す(表には載せる)
 
 
 # ------------------------------------------------------------------ 書式
@@ -83,74 +82,79 @@ def _nice_ticks(vmax: float, n: int = 4) -> list[float]:
     return out
 
 
-def chart_svg(rows: list, events: list[dict], unit: str, title: str) -> tuple[str | None, list[dict]]:
-    """1 指標の推移グラフ。戻り値: (SVG 文字列 or None, グラフに描いたイベント [番号つき])。
+CHART_EVENT_TYPES = {"衆院選投票", "参院選投票"}   # DESIGN.md 13.5: グラフの縦線は国政選挙の投票日だけ
+
+
+def chart_svg(rows: list, events: list[dict], unit: str, title: str,
+              reqs: list[dict] | None = None) -> tuple[str | None, list[dict], list[dict]]:
+    """1 指標の推移グラフ。戻り値: (SVG 文字列 or None, 縦線にした選挙 [番号つき], 申請・要望のレーン [番号つき])。
 
     線分と点は「その観測時点の直前比の方向」で色分けする(増加=青、減少=赤、横ばい・未取得=灰)。凡例はテンプレートで
     添え、方向は表の文字でも示す。線 2px・点 r=4 と 2px の白い輪。グリッドはヘアライン。
-    イベントは灰色の縦線と番号で示し、同じ番号の表を下に置く。
+    縦線は国政選挙の投票日のみ(13.5)。申請・要望は横軸を共有する下段のレーンに、申請=白抜きの四角、結果=塗りの菱形で
+    置き、同じ事業(計画名)を細線で結ぶ。どちらも同じ番号の表を図の下に置く。
     """
+    reqs = reqs or []
     pts = [r for r in rows if r.decided_date]
     vals = [r.value for r in pts if r.value is not None]
     if not vals:
-        return None, []
-    W, H, L, R, T, B = 880, 260, 84, 64, 26, 40
-    x0 = min(_days(r.decided_date) for r in pts)
-    x1 = max(_days(r.decided_date) for r in pts)
+        return None, [], []
+    from ..requests import chart_date
+    lanes: dict[str, list[dict]] = {}
+    for q in reqs:
+        a, b = chart_date(q)
+        if a or b:
+            lanes.setdefault(q["project_key"] or q["project_name"] or "?", []).append(q)
+    n_lanes = len(lanes)
+    W, L, R, T, B = 880, 84, 64, 26, 40
+    PH = 260                                   # 値のグラフの高さ
+    LANE = 16
+    H = PH + (18 + n_lanes * LANE if n_lanes else 0)
+    xs = [_days(r.decided_date) for r in pts]
+    for qs in lanes.values():
+        for q in qs:
+            xs += [_days(d) for d in chart_date(q) if d]
+    x0, x1 = min(xs), max(xs)
     pad = max(30, (x1 - x0) * 0.04)
     dx0, dx1 = x0 - pad, x1 + pad
     ticks = _nice_ticks(max(vals))
     ymax = ticks[-1] or 1
+    base = PH - B                              # 値グラフの基線
 
     def X(d):
         return L + (W - L - R) * (_days(d) - dx0) / (dx1 - dx0)
 
     def Y(v):
-        return T + (H - T - B) * (1 - v / ymax)
+        return T + (base - T) * (1 - v / ymax)
+
+    def hit(x, y, lines, r=9):
+        return (f'<circle class="event-hit" tabindex="0" cx="{x:.1f}" cy="{y:.1f}" r="{r}" fill="transparent" '
+                f'data-lines="{html.escape(json.dumps([l for l in lines if l], ensure_ascii=False))}">'
+                f'<title>{html.escape(" / ".join(l for l in lines if l))}</title></circle>')
 
     parts = [f'<svg viewBox="0 0 {W} {H}" role="img" aria-label="{html.escape(title)}" class="chart" data-points="__PTS__">']
     for t in ticks:
         parts.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{Y(t):.1f}" y2="{Y(t):.1f}"/>')
         parts.append(f'<g class="axis"><text x="{L - 6}" y="{Y(t) + 4:.1f}" text-anchor="end">{fmt_num(t)}</text></g>')
-    y_first, y_last = date.fromordinal(int(dx0)).year, date.fromordinal(int(dx1)).year
-    for y in range(y_first, y_last + 1):
+    for y in range(date.fromordinal(int(dx0)).year, date.fromordinal(int(dx1)).year + 1):
         d = f"{y}-01-01"
         if dx0 <= _days(d) <= dx1:
-            parts.append(f'<line class="grid" x1="{X(d):.1f}" x2="{X(d):.1f}" y1="{H - B}" y2="{H - B + 4}"/>')
-            parts.append(f'<g class="axis"><text x="{X(d):.1f}" y="{H - B + 16}" text-anchor="middle">{y}</text></g>')
-    parts.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{H - B}" y2="{H - B}"/>')
+            parts.append(f'<line class="grid" x1="{X(d):.1f}" x2="{X(d):.1f}" y1="{base}" y2="{base + 4}"/>')
+            parts.append(f'<g class="axis"><text x="{X(d):.1f}" y="{base + 16}" text-anchor="middle">{y}</text></g>')
+    parts.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{base}" y2="{base}"/>')
     parts.append(f'<g class="axis"><text x="{L - 6}" y="{T - 10}" text-anchor="end">{html.escape(unit)}</text></g>')
-    # ホバー用の領域(イベント線の当たり判定より下に置く)
-    parts.append(f'<rect class="plot-area" x="{L}" y="{T}" width="{W - L - R}" height="{H - T - B}" fill="transparent"/>')
-    # イベント(縦線と番号)
-    drawn = []
-    for e in events:
-        if e["event_type"] in CHART_EXCLUDED_TYPES:
-            continue
-        if not (dx0 <= _days(e["date"]) <= dx1):
-            continue
-        drawn.append(e)
-    # 近接する縦線(14px 以内)は番号ラベルを 1 つにまとめる(例: 3–7)。線と説明は個別に残す
-    clusters: list[list[int]] = []
-    for i, e in enumerate(drawn, 1):
-        if clusters and X(e["date"]) - X(drawn[clusters[-1][0] - 1]["date"]) < 14:
-            clusters[-1].append(i)
-        else:
-            clusters.append([i])
-    for k, cl in enumerate(clusters):
-        x = X(drawn[cl[0] - 1]["date"])
-        label = str(cl[0]) if len(cl) == 1 else f"{cl[0]}–{cl[-1]}"
-        parts.append(f'<text class="event-label" x="{x + 2:.1f}" y="{T - 6 - (k % 2) * 10}">{label}</text>')
+    parts.append(f'<rect class="plot-area" x="{L}" y="{T}" width="{W - L - R}" height="{base - T}" fill="transparent"/>')
+    # 選挙の縦線(値グラフと申請レーンを貫く)
+    drawn = [e for e in events if e["event_type"] in CHART_EVENT_TYPES and dx0 <= _days(e["date"]) <= dx1]
     for i, e in enumerate(drawn, 1):
         x = X(e["date"])
-        who = (e.get("actor_name") or "") + (f"({e['actor_party']})" if e.get("actor_party") else "")
-        lines = [f"{i}. {e['date']}" + (f"〜{e['end_date']}" if e.get("end_date") else "") + f" {e['event_type']}",
-                 who, e.get("summary") or ""]
-        parts.append(f'<line class="event" x1="{x:.1f}" x2="{x:.1f}" y1="{T - 4}" y2="{H - B}"/>')
-        parts.append(f'<line class="event-hit" tabindex="0" x1="{x:.1f}" x2="{x:.1f}" y1="{T - 4}" y2="{H - B}" '
-                     f'data-lines="{html.escape(json.dumps([l for l in lines if l], ensure_ascii=False))}">'
-                     f'<title>{html.escape(" / ".join(l for l in lines if l))}</title></line>')
-    # 線分(直前の観測値がある区間だけ。色は当該時点の方向)
+        parts.append(f'<line class="event" x1="{x:.1f}" x2="{x:.1f}" y1="{T - 4}" y2="{H - 4}"/>')
+        parts.append(f'<text class="event-label" x="{x + 2:.1f}" y="{T - 6 - (i % 2) * 10}">E{i}</text>')
+        summ = (e.get("summary") or "").split("。候補者")[0]
+        parts.append(f'<line class="event-hit" tabindex="0" x1="{x:.1f}" x2="{x:.1f}" y1="{T - 4}" y2="{base}" '
+                     f'data-lines="{html.escape(json.dumps([f"E{i}. {e["date"]} {e["event_type"]}", summ], ensure_ascii=False))}">'
+                     f'<title>{html.escape(f"E{i}. {e["date"]} {summ}")}</title></line>')
+    # 値の線分と点
     for a, b in zip(pts, pts[1:]):
         if a.value is None or b.value is None:
             continue
@@ -166,14 +170,46 @@ def chart_svg(rows: list, events: list[dict], unit: str, title: str) -> tuple[st
         hover.append({"x": round(x, 1), "lines": [f"{fmt_num(r.value)} {unit}", f"{r.period_start[:4]}年度分 decided {r.decided_date}",
                                                     "直前比 " + (f"{fmt_num(r.delta)}({dir_text(r.direction, r.delta_pct)})"
                                                                if r.delta is not None else "—")]})
-    # 直接ラベル: 最後の点だけ
     last = [r for r in pts if r.value is not None][-1]
     parts.append(f'<g class="axis"><text x="{X(last.decided_date) + 8:.1f}" y="{Y(last.value) + 4:.1f}" text-anchor="start">'
                  f'{fmt_num(last.value)}</text></g>')
-    parts.append(f'<line class="crosshair" visibility="hidden" x1="0" x2="0" y1="{T}" y2="{H - B}"/>')
+    # 申請・要望のレーン
+    lane_list = []
+    if n_lanes:
+        top = PH + 6
+        parts.append(f'<g class="axis"><text x="{L - 6}" y="{top + 6}" text-anchor="end">申請・要望</text></g>')
+        for k, (key, qs) in enumerate(lanes.items(), 1):
+            y = top + 10 + k * LANE - LANE / 2
+            parts.append(f'<line class="grid" x1="{L}" x2="{W - R}" y1="{y:.1f}" y2="{y:.1f}"/>')
+            parts.append(f'<g class="axis"><text x="{L - 6}" y="{y + 4:.1f}" text-anchor="end">P{k}</text></g>')
+            marks = []
+            for q in qs:
+                a, b = chart_date(q)
+                if a:
+                    marks.append((a, "apply", q))
+                if b:
+                    marks.append((b, "result", q))
+            marks.sort(key=lambda m: m[0])
+            for (d1, _, _), (d2, _, _) in zip(marks, marks[1:]):
+                parts.append(f'<line class="req-link" x1="{X(d1):.1f}" x2="{X(d2):.1f}" y1="{y:.1f}" y2="{y:.1f}"/>')
+            for d, kind, q in marks:
+                x = X(d)
+                if kind == "apply":
+                    parts.append(f'<rect class="req-apply" x="{x - 4:.1f}" y="{y - 4:.1f}" width="8" height="8"/>')
+                    lines = [f"P{k} 申請 {d}" + ("(年度のみ判明)" if q["date_precision"] == "fiscal_year" else ""),
+                             q["project_name"], f"申請先 {q['recipient'] or '—'} / {q['program'] or ''}"]
+                else:
+                    parts.append(f'<path class="req-result" d="M{x:.1f},{y - 5:.1f} L{x + 5:.1f},{y:.1f} L{x:.1f},{y + 5:.1f} '
+                                 f'L{x - 5:.1f},{y:.1f} Z"/>')
+                    amt = f" 配分 {fmt_num(q['result_amount_thousand_yen'])} 千円" if q.get("result_amount_thousand_yen") else ""
+                    lines = [f"P{k} 結果 {d}: {q['result']}{amt}", q["project_name"]]
+                parts.append(hit(x, y, lines))
+            lane_list.append({"n": k, "name": qs[0]["project_name"], "records": sorted(
+                qs, key=lambda q: (chart_date(q)[0] or chart_date(q)[1] or ""))})
+    parts.append(f'<line class="crosshair" visibility="hidden" x1="0" x2="0" y1="{T}" y2="{base}"/>')
     parts.append("</svg>")
     svg = "\n".join(parts).replace("__PTS__", html.escape(json.dumps(hover, ensure_ascii=False)))
-    return svg, [dict(e, n=i) for i, e in enumerate(drawn, 1)]
+    return svg, [dict(e, n=i) for i, e in enumerate(drawn, 1)], lane_list
 
 
 # ------------------------------------------------------------------ データ
@@ -313,13 +349,24 @@ def build(conn: sqlite3.Connection, pref: str, out_dir: Path | None = None) -> d
         rs = [r for r in trows if r.municipality_code == code]
         rel = [x for x in events if timeline.relevant(x, code, pref, districts)]
         evmap = {x["event_id"]: x for x in rel}
+        from .. import requests as RQ
+        reqs = RQ.for_municipality(conn, code)
+        req_status = [dict(x) for x in conn.execute(
+            "SELECT * FROM request_status WHERE municipality_code=? ORDER BY collection_source", (code,))]
         blocks = []
         for ind, (no, label, ministry) in INDICATORS.items():
             ir = [r for r in rs if r.indicator_id == ind]
             if not ir:
                 continue
-            svg, drawn = chart_svg(ir, rel, "千円", f"{nm} 指標 {no} {label} の推移")
+            linked = [q for q in reqs if q["indicator_link"] in (ind, "all")]
+            svg, drawn, lanes = chart_svg(ir, rel, "千円", f"{nm} 指標 {no} {label} の推移", linked)
+            req_in = {}
+            for r in ir:
+                if r.window_start:
+                    req_in[r.period_start] = [q for q in reqs if any(
+                        dd and r.window_start <= dd <= r.window_end for dd in (q["request_date"], q["result_date"]))]
             blocks.append({"id": ind, "no": no, "label": label, "ministry": ministry, "rows": ir, "svg": svg, "drawn": drawn,
+                           "lanes": lanes, "req_in": req_in,
                            "sources": source_list(r.source_url for r in ir),
                            "basis": sorted({r.decided_date_basis for r in ir if r.decided_date_basis})})
         items = [it for it in vres.item_rows if it["code"] == code]
@@ -330,7 +377,8 @@ def build(conn: sqlite3.Connection, pref: str, out_dir: Path | None = None) -> d
             "SELECT * FROM endorsements WHERE municipality_code=? AND collection_status='収集済'", (code,))]
         points = muni_points(conn, code, latest, groups, endorse_rows, len(rel), sum(1 for x in rel if not x["generated_by"]))
         write(f"municipalities/{code}.html", "municipality.html", code=code, name=nm, blocks=blocks, items=items,
-              item_sources=item_sources, events=rel, evmap=evmap, endorse=endorse_rows, points=points)
+              item_sources=item_sources, events=rel, evmap=evmap, endorse=endorse_rows, points=points,
+              reqs=reqs, req_status=req_status)
 
     # マトリックス
     from .. import matrix as M

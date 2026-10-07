@@ -11,7 +11,7 @@ from .. import config
 TABLES = [
     "municipalities", "municipality_fiscal", "politicians", "positions", "elections",
     "election_results", "endorsements", "subsidy_programs", "subsidy_allocations",
-    "requests", "statements", "cases", "signals", "fetch_log", "observations", "events",
+    "requests", "statements", "cases", "signals", "fetch_log", "observations", "events", "request_status",
 ]
 
 
@@ -30,6 +30,10 @@ def connect(path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def init_db(conn: sqlite3.Connection) -> None:
+    # 旧版の requests(列が少ない)は空のまま作り直す
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(requests)")}
+    if cols and "record_type" not in cols:
+        conn.execute("DROP TABLE requests")
     conn.executescript(schema_sql())
     conn.commit()
 

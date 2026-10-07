@@ -184,7 +184,7 @@ def _t(headers, rows):
 
 def _ev_short(e: dict) -> str:
     when = e["date"] + (f"〜{e['end_date']}" if e["end_date"] else "")
-    if e["event_type"] == "衆院選投票" and e["summary"]:
+    if e["event_type"] in ("衆院選投票", "参院選投票") and e["summary"]:
         return f"{when} [{e['event_type']}] " + e["summary"].split("。候補者")[0]
     who = e["actor_name"] or ""
     if e["actor_party"]:

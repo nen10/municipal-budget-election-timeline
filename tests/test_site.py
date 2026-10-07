@@ -69,4 +69,7 @@ def test_site_build_all_pages_and_no_broken_links(tmp_path, fixtures):
             assert b not in text, (page, b)
     m = (out / "municipalities" / "092151.html").read_text(encoding="utf-8")
     assert "<svg" in m and "減少" in m and "川俣純子" in m and "大幅にカット" in m
-    assert 'scope="col"' in m and "<caption>" in m
+    assert 'scope="col"' in m and "<caption>" in m and 'id="requests"' in m
+    # グラフの縦線は国政選挙の投票日だけ(DESIGN.md 13.5)。支持表明や報道は SVG に描かない
+    for svg in re.findall(r"<svg.*?</svg>", m, re.S):
+        assert "首長の支持表明" not in svg and "議員発言" not in svg and "役職就任" not in svg

@@ -30,6 +30,7 @@ ELECTION_SOURCES = _election_sources()
 AUX_SOURCES = {
     "soumu_jumin": ("national", "総務省 住民基本台帳人口(市区町村別)。全国の市区町村マスタと参考人口"),
     "kokkai": ("national", "国会会議録検索システム API(発言キーワード)"),
+    "requests": ("national", "申請・要望の記録: 国交省 事後評価一覧(全国)・当初配分資料から機械生成、市町サイトの計画書・要望は手作業で登録"),
 }
 
 

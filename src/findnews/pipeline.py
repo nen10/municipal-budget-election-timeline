@@ -14,7 +14,7 @@ from .municipalities import has_master, load_masters
 from .sources import INDICATOR_SOURCES, election_source
 from .sources.base import Observation
 
-ORDER = ["soumu_jumin", "soumu_card", "soumu_tokko", "mlit_grants", "mlit_road", "election", "kokkai"]
+ORDER = ["soumu_jumin", "soumu_card", "soumu_tokko", "mlit_grants", "mlit_road", "election", "requests", "kokkai"]
 
 
 def store_observations(conn: sqlite3.Connection, obs: list[Observation]) -> int:
@@ -85,6 +85,12 @@ def run(conn: sqlite3.Connection, pref_code: str, years: list[int] | None = None
             es = election_source(pref_code)
             out[sid] = es.run(conn, offline, force) if es else {"status": "未対応",
                                                               "reason": f"都道府県 {pref_code} の選管アダプタが未実装"}
+        elif sid == "requests":
+            from . import config
+            from . import requests as R
+            got = {} if offline else R.download_sources(config.MANUAL_DIR, force)
+            manual.load_all(conn)
+            out[sid] = {"download": got, "generated": R.generate(conn, pref_code, config.MANUAL_DIR)}
         elif sid == "kokkai":
             from .fetch import kokkai
             out[sid] = kokkai.run(conn, offline=offline)

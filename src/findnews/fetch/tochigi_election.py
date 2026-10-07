@@ -1,6 +1,7 @@
 """栃木県選挙管理委員会 衆院選(小選挙区)の開票区別得票の取得。
 
-対応する選挙(ELECTIONS): 2026-02-08(r08syugi)、2024-10-27(r06syugi)、2021-10-31(r03syugi)。
+対応する選挙(ELECTIONS): 衆院選 2026-02-08(r08syugi)、2024-10-27(r06syugi)、2021-10-31(r03syugi)。
+参院選(栃木県選挙区): 2025-07-20(r07sangi、HTML)、2022-07-10(r04sangi、Excel)。load_sangiin() を参照。
 投票日は各 Excel の表題「令和N年M月D日執行」から読み取って elections に登録する(推測しない)。
 選挙 ID: shugiin_<YYYYMMDD>_smd_09_<区>。選挙単位のまとめ ID は shugiin_<YYYYMMDD>。
 
@@ -76,6 +77,46 @@ def list_sources(keys=None) -> list[dict]:
                 out.append({"key": key, "url": urljoin(kidx, a["href"]), "filename": f"kouho_{key}_{m.group(2)}.pdf",
                             "index": kidx, "error": None})
     return out
+
+
+# 参院選(栃木県選挙区)。確定値の形式が年で異なる(2022 は Excel、2025 は HTML のみ)
+SANGIIN = {"r07sangi": ("file/AS_KAIHYO.html", "sangiin_r07sangi_kaihyo.html"),
+           "r04sangi": ("file/BS_KAIHYO_K_30.xls", "sangiin_r04sangi_kaihyo.xls")}
+
+
+def sangiin_sources() -> list[dict]:
+    return [{"key": k, "url": urljoin(BASE.format(key=k), f), "filename": fn, "index": BASE.format(key=k), "error": None}
+            for k, (f, fn) in SANGIIN.items()]
+
+
+def load_sangiin(conn: sqlite3.Connection) -> int:
+    """参院選 栃木県選挙区の開票区別得票を投入する。選挙 ID: sangiin_<YYYYMMDD>_smd_09_1(選挙区は 1 つ)。"""
+    from ..parse import tochigi_sangiin as S
+    n = 0
+    for p in sorted(http.raw_dir(SOURCE).glob("sangiin_*_kaihyo.*")):
+        res = S.parse_html(p) if p.suffix == ".html" else S.parse_xls(p)
+        meta = http.manifest_meta(p) or {"url": None, "retrieved_at": None}
+        if not res.date or not res.totals:
+            db.log_fetch(conn, SOURCE, "parse", "error", f"{p.name}: 日付または県計を読めない", meta["url"])
+            continue
+        eid = f"sangiin_{res.date.replace('-', '')}_smd_09_1"
+        conn.execute("""INSERT OR REPLACE INTO elections(election_id, kind, election_date, district, pref_code, source_url, retrieved_at)
+                        VALUES (?,?,?,?,?,?,?)""", (eid, "sangiin_district", res.date, "栃木県選挙区", "09", meta["url"], meta["retrieved_at"]))
+        conn.execute("DELETE FROM election_results WHERE election_id=?", (eid,))
+        party = dict(res.candidates)
+        pol = _politician_index(conn)
+        for unit, cand, votes in res.rows:
+            conn.execute(
+                """INSERT OR REPLACE INTO election_results(election_id, municipality_code, counting_unit, candidate_name,
+                   politician_id, party, filing_type, nomination, dual_candidacy, votes, is_district_winner, source_url, retrieved_at)
+                   VALUES (?,?,?,?,?,?,?,?,0,?,?,?,?)""",
+                (eid, lookup(unit), unit, cand, pol.get(normalize_name(cand)), party.get(cand), None,
+                 f"{party.get(cand)}(党派欄)", votes, int(cand == res.winner), meta["url"], meta["retrieved_at"]))
+            n += 1
+        db.log_fetch(conn, SOURCE, "parse", "ok", f"{p.name}: {res.title} 当選 {res.winner}(県計 {res.totals.get(res.winner):,.0f})", meta["url"])
+    conn.commit()
+    finalize_results(conn)
+    return n
 
 
 def local_files():
@@ -186,7 +227,7 @@ def load(conn: sqlite3.Connection, parsed) -> int:
 
 def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False, keys=None) -> dict:
     if not offline:
-        for s in list_sources(keys):
+        for s in list_sources(keys) + sangiin_sources():
             if not s["url"]:
                 db.log_fetch(conn, SOURCE, "list", "error", f"{s['key']}: {s['error']}", s["index"])
                 continue
@@ -202,5 +243,6 @@ def run(conn: sqlite3.Connection, offline: bool = False, force: bool = False, ke
                      f"{d['path'].name}: 候補者属性の突合 {matched}/{len(d['rows'])} 行; {d['meta']['title']} {d['meta']['status']}: districts={len(d['summaries'])} rows={len(d['rows'])}",
                      d["file_meta"]["url"])
     n = load(conn, parsed)
-    db.log_fetch(conn, SOURCE, "load", "ok", f"{n} rows")
-    return {"files": len(parsed), "rows": n}
+    ns = load_sangiin(conn)
+    db.log_fetch(conn, SOURCE, "load", "ok", f"{n} rows (衆院) + {ns} rows (参院)")
+    return {"files": len(parsed), "rows": n, "sangiin_rows": ns}
