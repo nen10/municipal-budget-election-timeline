@@ -1,215 +1,93 @@
-"""Markdown レポートの生成。文言は「要検証シグナル」に限定し、意図や因果を断定しない。"""
+"""検出レポート(Markdown)。文言は「要検証シグナル」に限定し、意図や因果を断定しない。
+政党名・候補者名・役職・金額・日付は省略しない(DESIGN.md 11.6)。"""
 
 from __future__ import annotations
 
 import json
-import math
 import sqlite3
 
-import pandas as pd
-
+from .. import verify as V
 from ..municipalities import TOCHIGI
-from .panel import decision_date
 from .score import WEIGHTS
-from .statements import by_politician, mentioning, snippet
+from .statements import by_politician, excerpt, mentioning
 
 DISCLAIMER = (
-    "> この文書は公開データから機械的に算出した **要検証シグナル** の一覧です。"
-    "数値の偏差は事業サイクル・災害復旧・計画の統廃合・申請の有無など多くの理由で生じます。"
+    "> この文書は公開データから機械的に算出した **要検証シグナル** の一覧です。各自治体を自分自身の過去とだけ比べており、"
+    "他自治体との比較はしていません。増減は事業サイクル・災害復旧・計画の統廃合・申請の有無など多くの理由で生じます。"
     "ここに載ることは、いかなる個人・団体の不正や意図を示すものでもありません。"
-    "結論を出す前に、必ず一次資料と当事者への取材で確認してください。"
 )
-
-METRIC_LABEL = {
-    "card:国庫支出金": "決算 国庫支出金",
-    "card:都道府県支出金": "決算 都道府県支出金",
-    "card:特別交付税": "決算 特別交付税",
-    "card:普通建設事業費_うち補助": "決算 普通建設事業費(補助)",
-    "card:土木費": "決算 土木費",
-    "tokko:交付総額": "特別交付税 交付総額(報道発表)",
-    "tokko:3月交付額": "特別交付税 3月交付額(報道発表)",
-    "mlit:road_maint": "道路メンテナンス事業 当初配分(単独)",
-    "mlit:sole_grants": "社総交+防安交 単独計画の当初配分",
-    "mlit:joint_plans": "社総交+防安交 共同計画への参加件数",
-}
+LABEL = {"3b": "指標 3 特別交付税 3月分", "4": "指標 4 社総交・防安交(単独策定主体)", "5": "指標 5 道路局箇所表(事業主体=市町)"}
 
 
-def _fmt(v, nd=0):
-    if v is None or (isinstance(v, float) and math.isnan(v)):
-        return "—"
-    if nd == 0:
-        return f"{v:,.0f}"
-    return f"{v:+.{nd}f}" if nd and v is not None else str(v)
-
-
-def _table(headers, rows) -> str:
+def _t(headers, rows):
     out = ["| " + " | ".join(headers) + " |", "|" + "---|" * len(headers)]
-    out += ["| " + " | ".join(str(c) for c in r) + " |" for r in rows]
+    out += ["| " + " | ".join(str(x).replace("|", "/") for x in r) + " |" for r in rows]
     return "\n".join(out)
 
 
-def joint_plan_changes(conn: sqlite3.Connection, code: str) -> list[str]:
-    rows = conn.execute(
-        """SELECT fiscal_year, program_id, item_name, amount_thousand_yen FROM subsidy_allocations
-           WHERE program_id IN ('mlit_shasoukou','mlit_bouan') AND attribution='joint'
-             AND (',' || recipient_codes || ',') LIKE ? ORDER BY fiscal_year, item_name""", (f"%,{code},%",)).fetchall()
-    by_year: dict[int, dict[str, float]] = {}
-    for r in rows:
-        by_year.setdefault(r[0], {})[r[2]] = r[3]
-    out = []
-    prev = None
-    for fy in sorted(by_year):
-        cur = by_year[fy]
-        line = f"- FY{fy}: {len(cur)} 件"
-        if prev is not None:
-            added = sorted(set(cur) - set(prev))
-            removed = sorted(set(prev) - set(cur))
-            if added:
-                line += " / 新たに含まれた: " + "、".join(added)
-            if removed:
-                line += " / 含まれなくなった: " + "、".join(removed)
-        out.append(line)
-        prev = cur
-    out.append("  (計画名の期替わり(第三期→第四期など)も「含まれなくなった/新たに含まれた」として表示される)")
-    return out
-
-
-def latest_errors(conn: sqlite3.Connection) -> list[tuple[str, str, str]]:
-    """(source, step, 対象) ごとに最新の記録がエラーのものだけを返す(後で成功したものは除く)。"""
-    latest: dict[tuple, tuple] = {}
-    for r in conn.execute("SELECT source, step, status, detail, source_url FROM fetch_log ORDER BY id"):
-        target = (r["detail"] or "").split(":")[0] if r["step"] == "parse" else (r["source_url"] or r["detail"])
-        latest[(r["source"], r["step"], target)] = (r["status"], r["detail"] or "")
-    return [(k[0], k[1], v[1]) for k, v in latest.items() if v[0] == "error"]
-
-
-def render(conn: sqlite3.Connection, run_id, pref_code, k, series, dev, groups, feats, pnl, sig, st, focus) -> str:
-    L = [f"# 要検証シグナル レポート(都道府県コード {pref_code})", "", f"run_id: `{run_id}`", "", DISCLAIMER, ""]
-
-    # 1. データの範囲
-    L += ["## 1. 使用データの範囲", ""]
-    if len(series):
-        cov = series.groupby("metric").agg(years=("fiscal_year", lambda s: f"{int(s.min())}–{int(s.max())}"),
-                                           municipalities=("code", "nunique"),
-                                           non_null=("value", lambda s: int(s.notna().sum())))
-        L.append(_table(["指標", "内容", "年度", "自治体数", "値のある行"],
-                        [[m, METRIC_LABEL.get(m, m), r.years, r.municipalities, r.non_null] for m, r in cov.iterrows()]))
-    L += ["", "金額の単位は千円。年度は西暦の会計年度(令和6年度 = 2024)。",
-          "選挙(2026-02-08)より後に決定された値を「選挙後」とみなす: 国交省の当初配分は FY2026(2026 年 4 月公表)、"
-          "特別交付税は FY2025 の 3 月分(2026-03-17 決定)。決算カードは FY2024 が最新で、選挙後の決算値はまだ存在しない。", ""]
-    # 決算カードと報道発表の特別交付税の突合(同じ値になるはず)
-    chk = conn.execute(
-        """SELECT COUNT(*), SUM(ABS(f.value - a.amount_thousand_yen) < 0.5) FROM municipality_fiscal f
-           JOIN subsidy_allocations a ON a.municipality_code=f.code AND a.fiscal_year=f.fiscal_year
-           WHERE f.item='特別交付税' AND f.source='soumu_card' AND a.program_id='soumu_tokko' AND a.item_name='交付総額'""").fetchone()
-    if chk and chk[0]:
-        L += [f"検算: 決算カードの特別交付税と報道発表の交付総額が一致した市×年度 {chk[1]} / {chk[0]}。", ""]
-    errs = latest_errors(conn)
-    if errs:
-        L += ["最新の実行でエラーのままの取得・パース(fetch_log):", ""]
-        L += [f"- {s_} / {st_}: {d_[:200]}" for s_, st_, d_ in errs]
-        L.append("")
-
-    # 2. ピア
-    L += ["## 2. ピア(比較対象)の定義", "",
-          f"同県内で、決算カード(FY{int(feats['base_year'].iloc[0]) if len(feats) else '—'})の財政力指数と住民基本台帳人口(対数)を"
-          f"県内で標準化し、距離の近い {k} 団体をピアとした。", ""]
-    for c in focus:
-        if c in groups:
-            rows = [[p, TOCHIGI.get(p, p), f"{feats.loc[p, 'fci']:.2f}", f"{math.exp(feats.loc[p, 'logpop']):,.0f}"]
-                    for p in [c] + groups[c]]
-            L += [f"**{TOCHIGI.get(c, c)}({c})のピア**", "", _table(["コード", "名称", "財政力指数", "人口"], rows), ""]
-
-    # 3. 対象自治体の推移
-    L += ["## 3. 対象自治体の年度推移とピア比偏差", "",
-          "各セル: 値(千円、件数指標は件) / 対称変化率 g / ピア中央値 / z。z = (g − ピア中央値) / max(ピア標準偏差, 0.05)。"
-          "「*」は選挙後に決定された値。", ""]
-    edate = pd.Timestamp("2026-02-08").date()
-    for c in focus:
-        d = dev[dev.code == c]
-        if d.empty:
-            L += [f"### {TOCHIGI.get(c, c)}({c})", "", "データなし", ""]
-            continue
-        L += [f"### {TOCHIGI.get(c, c)}({c})", ""]
-        years = sorted(d.fiscal_year.unique())
-        rows = []
-        for m in sorted(d.metric.unique(), key=lambda x: list(METRIC_LABEL).index(x) if x in METRIC_LABEL else 99):
-            row = [METRIC_LABEL.get(m, m)]
-            for y in years:
-                r = d[(d.metric == m) & (d.fiscal_year == y)]
-                if r.empty:
-                    row.append("")
-                    continue
-                r = r.iloc[0]
-                mark = "*" if decision_date(m, int(y)) > edate else ""
-                val = _fmt(r.value)
-                if pd.isna(r.growth):
-                    row.append(f"{val}{mark}")
-                else:
-                    med = "—" if pd.isna(r.peer_median_growth) else f"{r.peer_median_growth:+.2f}"
-                    row.append(f"{val}{mark}<br>g={r.growth:+.2f} / 中央値={med}<br>z={_fmt(r.z, 2)}")
-            rows.append(row)
-        L += [_table(["指標"] + [str(int(y)) for y in years], rows), ""]
-        alt = {m: p_ for m, p_ in d.groupby("metric")["peers"].first().items() if p_ != ",".join(groups.get(c, []))}
-        for m, p_ in alt.items():
-            L.append(f"- {METRIC_LABEL.get(m, m)} のピア(値のある自治体から選択): "
-                     + "、".join(TOCHIGI.get(x, x) for x in p_.split(",") if x))
-        L += ["", f"**{TOCHIGI.get(c, c)} が策定主体に含まれる共同計画(社総交・防安交、金額は計画全体で按分不能)**", ""]
-        L += joint_plan_changes(conn, c)
-        L.append("")
-
-    # 4. シグナル
-    L += ["## 4. 寄与内訳つきスコア", "",
+def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, st, th) -> str:
+    L = [f"# 要検証シグナル レポート(都道府県コード {pref_code}、選挙 {group})", "", f"run_id: `{run_id}`", "", DISCLAIMER, ""]
+    if w:
+        L += [f"選挙前 = {w['pre_years']} 年度平均、選挙後 = 指標 4・5 は {w['post_year']} 年度、指標 3 は "
+              f"{w['post_year_tokko']} 年度 3 月分。方向の閾値 ±{th * 100:.1f}%。", ""]
+    L += ["## 1. 寄与内訳つきスコア", "",
           "重み: " + "、".join(f"{k} {v}" for k, v in WEIGHTS.items()) +
           "。score は当該議員が当該自治体で最多得票でなかった場合のみ出力(それ以外は 0、ゲート前の値は score_ungated)。"
-          "スコアは確認の優先順位付けのための目安であり、確率や疑惑の強さではない。", ""]
+          "確認の優先順位付けの目安であり、確率や疑惑の強さではない。", ""]
     if len(sig):
         rows = []
         for r in sig.sort_values(["score", "score_ungated"], ascending=False).itertuples():
             ev = json.loads(r.evidence)
-            rows.append([f"{TOCHIGI.get(r.municipality_code, r.municipality_code)}", r.politician_id,
-                         "" if pd.isna(r.fiscal_year) else int(r.fiscal_year),
-                         "はい" if r.opposed_locally else "いいえ", f"{r.candidate_share:.1%}",
+            ind = "; ".join(f"{LABEL[k]}: " + (f"{V._n(v['pre_avg'])}→{V._n(v['post'])} ({V._pct(v['rate'])}, {v['direction']})"
+                                               if v else V.MISSING) for k, v in ev["indicators"].items())
+            rows.append([TOCHIGI.get(r.municipality_code), f"{r.candidate_name}({r.nomination}、{r.result_label})",
+                         f"{r.candidate_share:.1%}({r.candidate_rank}位)", f"{r.top_candidate}({r.top_nomination}) {r.top_share:.1%}",
                          f"{r.score:.3f}", f"{r.score_ungated:.3f}",
-                         f"財政 {r.c_fiscal_deviation:.2f} / 発言 {r.c_statement_match:.2f} / 権限 {r.c_authority:.2f} / 反転 {r.c_reversal:.2f}",
-                         f"{METRIC_LABEL.get(ev['worst_post_metric'], ev['worst_post_metric'])} z={ev['worst_post_z']}"])
-        L += [_table(["自治体", "議員", "年度", "当該自治体で非最多", "得票率", "score", "score_ungated",
-                      "寄与(0〜1)", "最も負の選挙後指標"], rows), ""]
-        L += ["権限の判定メモ: " + json.loads(sig.iloc[0].evidence)["authority_note"], ""]
+                         f"自身の減少 {r.c_own_decline:.2f} / 発言 {r.c_statement_match:.2f} / 権限 {r.c_authority:.2f} / 反転 {r.c_reversal:.2f}",
+                         ind])
+        L += [_t(["自治体", "議員(政党、結果)", "議員の得票率(順位)", "自治体内 1 位", "score", "score_ungated", "寄与(0〜1)",
+                  "指標(選挙前平均→選挙後)"], rows), ""]
+        L += ["権限の判定メモ:", ""] + sorted({f"- {r.politician_id}: {json.loads(r.evidence)['authority_note']}"
+                                            for r in sig.itertuples()}) + [""]
     else:
-        L += ["シグナルなし(選挙結果または指標が未投入)", ""]
+        L += ["シグナルなし(politicians.csv に登録された候補の選挙結果がない)", ""]
 
-    # 5. 発言
-    L += ["## 5. 発言キーワード一致", ""]
+    L += ["## 2. 発言キーワード一致(原文)", ""]
     if len(st):
         kc = st.matched_keywords.str.split("|").explode().value_counts()
-        L += [_table(["キーワード", "一致した発言数"], [[k_, v] for k_, v in kc.items()]), ""]
-        pols = [r[0] for r in conn.execute("SELECT politician_id FROM politicians")]
-        for pid in pols:
+        L += [_t(["キーワード", "一致した発言数"], [[k, v] for k, v in kc.items()]), ""]
+        press = st[st.source == "press"]
+        if len(press):
+            L += ["### 報道された発言(data/manual/statements.csv、引用文は原文)", ""]
+            for r in press.itertuples():
+                L.append(f"- 発言者: {r.speaker} / 日付: {r.date} / 場: {r.meeting} / 媒体: {r.speaker_group} / 出典: {r.source_url}")
+                L.append(f"  - 引用:「{r.body}」 一致キーワード: {r.matched_keywords}")
+            L.append("")
+        pids = [x[0] for x in conn.execute("SELECT politician_id FROM politicians")]
+        L += ["### 登録議員の発言で一致したもの", ""]
+        for pid in pids:
             sp = by_politician(st, pid)
-            L += [f"**{pid} の発言で一致したもの: {len(sp)} 件**", ""]
-            for r in sp.head(10).itertuples():
-                L.append(f"- {r.date} {r.meeting}「{snippet(r.body, r.matched_keywords)}」 {r.source_url}")
-            L.append("")
-        for c in focus:
+            if len(sp):
+                L.append(f"**{pid}: {len(sp)} 件**")
+                for r in sp.itertuples():
+                    L.append(f"- {r.date} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}")
+                L.append("")
+        codes = sorted({c for c in (sig.municipality_code if len(sig) else [])})
+        L += ["### 選挙区内の自治体名を含み一致したもの", ""]
+        for c in codes:
             sm = mentioning(st, c)
-            L += [f"**{TOCHIGI.get(c, c)} の名称を含み、キーワードに一致した発言: {len(sm)} 件**", ""]
-            for r in sm.head(10).itertuples():
-                L.append(f"- {r.date} {r.speaker} {r.meeting}「{snippet(r.body, r.matched_keywords)}」 {r.source_url}")
-            L.append("")
-    else:
-        L += ["一致した発言はない(または未取得)", ""]
-
-    # 6. 注意
-    L += ["## 6. 解釈上の注意", "",
-          "- 町(那珂川町など)の特別交付税は報道発表に個別額がなく、決算カード(FY2024 まで)でしか追えない。",
-          "- 国交省の社総交・防安交は共同計画の自治体別内訳が公表されていない。単独計画と道路メンテナンス事業のみ自治体に帰属させ、"
-          "共同計画は参加件数だけを数えている。県事業(計画策定主体が県のみ)は市町に帰属させていない。",
-          "- 当初配分のみで、補正予算・年度途中の追加配分・交付決定額(実績)は含まない。",
-          "- 道路メンテナンス事業は橋梁点検・修繕計画の進捗で年ごとに大きく変動する。小規模町の値は数千万円単位で、"
-          "わずかな額の差でも変化率が大きくなる。",
-          "- ピアは 5 団体と少なく、z は不安定になりやすい。選挙前年度の z(参考列)と比べて、選挙後の値が例外的かどうかを見ること。",
-          "- 支持表明(endorsements)は出典未確認のため空欄で、ゲートは選挙結果の得票(当該自治体で最多得票でない)だけで判定している。",
-          "- 役職データ(positions.csv)は出典未確認(unverified)。農林水産省の役職は、本フェーズで取得した総務省・国交省の指標とは所管が一致しない。",
-          ""]
-    return "\n".join(L)
+            if len(sm):
+                L.append(f"**{TOCHIGI[c]}: {len(sm)} 件**")
+                for r in sm.itertuples():
+                    L.append(f"- {r.date} {r.speaker} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}")
+                L.append("")
+        kok = st[st.source == "kokkai"]
+        L += [f"### 国会会議録で一致した発言(全 {len(kok)} 件、発言者・会議・日付・URL)", ""]
+        for r in kok.sort_values("date").itertuples():
+            L.append(f"- {r.date} {r.speaker}({r.speaker_group or ''}) {r.meeting} [{r.matched_keywords}] {r.source_url}")
+        L.append("")
+    L += ["## 3. 注意", "",
+          "- 各自治体の値は verify(DESIGN.md 第10節)と同じ計算。全年度の表は data/processed/verification_tochigi.md。",
+          "- 町の特別交付税(指標 3)は報道発表に個別額がなく未取得。指標 4 は単独策定主体の計画のみ、指標 5 は事業主体が当該市町の箇所のみ。",
+          "- キーワード「大幅にカット」は契機事例の報道から追加したため、この事例の一致は独立した検証にならない。", ""]
+    return "\n".join(L) + "\n"

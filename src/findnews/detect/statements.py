@@ -1,4 +1,4 @@
-"""発言キーワード一致の集計(設計書 5.3)。取得・本文一致の判定は fetch/kokkai.py で行う。"""
+"""発言キーワード一致の集計(設計書 5.3)。取得・本文一致の判定は fetch/kokkai.py と manual.py で行う。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import pandas as pd
 
 def load_statements(conn: sqlite3.Connection) -> pd.DataFrame:
     return pd.read_sql_query(
-        """SELECT id, source, speaker, politician_id, date, meeting, matched_keywords, target_municipalities, source_url,
-                  substr(body, 1, 4000) AS body
+        """SELECT id, source, speaker, speaker_group, politician_id, date, meeting, matched_keywords,
+                  target_municipalities, source_url, body
            FROM statements WHERE matched_keywords IS NOT NULL AND matched_keywords <> ''""", conn)
 
 
@@ -22,8 +22,8 @@ def mentioning(st: pd.DataFrame, code: str) -> pd.DataFrame:
     return st[st.target_municipalities.fillna("").str.split(",").apply(lambda xs: code in xs)]
 
 
-def snippet(body: str, keywords: str, width: int = 60) -> str:
-    """一致キーワードの前後だけを抜き出す(全文転載を避ける)。"""
+def excerpt(body: str, keywords: str, width: int = 80) -> str:
+    """一致キーワードの前後の原文(改変しない抜き出し)。全文は DB の statements.body にある。"""
     body = (body or "").replace("\r", "").replace("\n", " ")
     for kw in (keywords or "").split("|"):
         i = body.find(kw)

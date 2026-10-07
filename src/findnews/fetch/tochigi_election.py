@@ -176,7 +176,7 @@ def load(conn: sqlite3.Connection, parsed) -> int:
                  K.nomination_label(c) if c else None, c.incumbency if c else None,
                  None if not c or c.dual is None else int(c.dual), r.votes,
                  int(s is not None and s.winner == r.candidate), s.sekihai.get(r.candidate) if s else None,
-                 url + (f" ; {kurl}" if kurl else ""), ra),
+                 " ; ".join(x for x in (url, kurl) if x) or None, ra),
             )
             n += 1
     conn.commit()

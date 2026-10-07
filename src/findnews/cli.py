@@ -83,13 +83,34 @@ def f_mlit(ctx, offline, force):
     click.echo(json.dumps(mlit_grants.run(_conn(ctx.obj["db"]), None, offline, force), ensure_ascii=False))
 
 
+@fetch_group.command("mlit-road")
+@_offline_opts
+@click.pass_context
+def f_mlit_road(ctx, offline, force):
+    """国交省 道路局 当初配分箇所表(栃木県、事業主体別)。PDF は mlit-grants と共通。"""
+    from .fetch import mlit_road
+    click.echo(json.dumps(mlit_road.run(_conn(ctx.obj["db"]), offline, force), ensure_ascii=False))
+
+
+@fetch_group.command("soumu-jumin")
+@_offline_opts
+@click.pass_context
+def f_jumin(ctx, offline, force):
+    """総務省 住民基本台帳人口(市区町村別、最新年)。検証の参考人口列に使う。"""
+    from .fetch import soumu_jumin
+    click.echo(json.dumps(soumu_jumin.run(_conn(ctx.obj["db"]), offline, force), ensure_ascii=False))
+
+
 @fetch_group.command("tochigi-election")
 @_offline_opts
 @click.pass_context
 def f_election(ctx, offline, force):
-    """栃木県選管 2026 年 2 月衆院選(小選挙区)の開票区別得票。"""
+    """栃木県選管 衆院選(2026-02, 2024-10, 2021-10)の開票区別得票と候補者届出状況公表票。"""
     from .fetch import tochigi_election
-    click.echo(json.dumps(tochigi_election.run(_conn(ctx.obj["db"]), offline, force), ensure_ascii=False))
+    conn = _conn(ctx.obj["db"])
+    res = tochigi_election.run(conn, offline, force)
+    manual.load_all(conn)  # 比例復活・議員 ID の反映
+    click.echo(json.dumps(res, ensure_ascii=False))
 
 
 @fetch_group.command("kokkai")
@@ -108,12 +129,14 @@ def f_kokkai(ctx, since, max_records, offline):
 @click.pass_context
 def f_all(ctx, offline, force):
     """全ソースを順に実行(手作業データを先に読み込む)。"""
-    from .fetch import kokkai, mlit_grants, soumu_card, soumu_tokko, tochigi_election
+    from .fetch import kokkai, mlit_grants, mlit_road, soumu_card, soumu_jumin, soumu_tokko, tochigi_election
     conn = _conn(ctx.obj["db"])
     click.echo(json.dumps({"manual": manual.load_all(conn)}, ensure_ascii=False))
     for name, fn in [("soumu_card", lambda: soumu_card.run(conn, 5, offline, force)),
                      ("soumu_tokko", lambda: soumu_tokko.run(conn, None, offline, force)),
                      ("mlit_grants", lambda: mlit_grants.run(conn, None, offline, force)),
+                     ("mlit_road", lambda: mlit_road.run(conn, True, force)),
+                     ("soumu_jumin", lambda: soumu_jumin.run(conn, offline, force)),
                      ("tochigi_election", lambda: tochigi_election.run(conn, offline, force)),
                      ("kokkai", lambda: kokkai.run(conn, offline=offline))]:
         try:
@@ -143,16 +166,45 @@ def detect_group():
 
 @detect_group.command("run")
 @click.option("--pref", default="09", show_default=True, help="都道府県コード 2 桁")
-@click.option("--k", default=5, show_default=True, help="ピアの数")
+@click.option("--election", default=None, help="選挙 ID(例: shugiin_20260208。既定は最新)")
 @click.option("--out", "out_dir", type=click.Path(), default=None, help="出力先(既定: data/processed/reports/<run_id>)")
-@click.option("--focus", default=None, help="詳細表示する自治体コード(カンマ区切り。既定は cases.yaml の検証中事例)")
 @click.pass_context
-def detect_cmd(ctx, pref, k, out_dir, focus):
-    """パネル構築・ピア比偏差・発言一致・寄与内訳つきスコアを CSV と Markdown に出力。"""
+def detect_cmd(ctx, pref, election, out_dir):
+    """パネル構築・自治体自身の時系列における減少・発言一致・寄与内訳つきスコアを CSV と Markdown に出力。"""
     conn = _conn(ctx.obj["db"])
-    res = detect_run.run(conn, pref, k, Path(out_dir) if out_dir else None,
-                         focus.split(",") if focus else None)
+    res = detect_run.run(conn, pref, Path(out_dir) if out_dir else None, election)
     click.echo(json.dumps(res, ensure_ascii=False))
+
+
+@main.group("verify")
+def verify_group():
+    """検証(DESIGN.md 第10節)。"""
+
+
+@verify_group.command("tochigi")
+@click.option("--out", "out_path", type=click.Path(), default=None,
+              help="出力先(既定: data/processed/verification_tochigi.md)")
+@click.pass_context
+def verify_tochigi(ctx, out_path):
+    """栃木県全 25 市町の補助金・交付金の時系列記録(各自治体を自分の過去とだけ比べる)。"""
+    from . import verify
+    out = Path(out_path) if out_path else config.PROCESSED_DIR / "verification_tochigi.md"
+    res = verify.run(_conn(ctx.obj["db"]), out, "09")
+    click.echo(json.dumps({"out": str(out), "municipalities": len(res.codes), "item_rows": len(res.item_rows),
+                           "threshold": res.threshold}, ensure_ascii=False))
+
+
+@main.command("matrix")
+@click.option("--pref", default="09", show_default=True)
+@click.option("--election", required=True, help="選挙 ID(例: shugiin_20260208, shugiin_20241027, shugiin_20211031)")
+@click.option("--out", "out_dir", type=click.Path(), default=None, help="出力ディレクトリ(既定: data/processed)")
+@click.pass_context
+def matrix_cmd(ctx, pref, election, out_dir):
+    """国政選挙との分離マトリックス(DESIGN.md 第11節)。"""
+    from . import matrix
+    if pref != "09":
+        raise click.UsageError("第1フェーズは栃木県(09)のみ対応")
+    click.echo(json.dumps(matrix.run(_conn(ctx.obj["db"]), election, pref, out_dir), ensure_ascii=False, default=str))
 
 
 @main.command("status")

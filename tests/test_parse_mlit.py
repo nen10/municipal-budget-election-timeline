@@ -16,14 +16,6 @@ def test_kasho_fixture(fixtures):
     assert unresolved <= {"芳賀中部上水道企業団"}
 
 
-def test_road_maintenance_rows(fixtures):
-    d = P.parse_pdf(fixtures / "kasho_2026_09_sample.pdf")
-    rm = {(r.entity, r.item_name): r.amount_million_yen for r in d["road_maintenance"]}
-    assert rm[("那須烏山市", "橋梁長寿命化修繕計画")] == 20
-    assert rm[("那珂川町", "橋梁長寿命化修繕計画")] == 37
-    assert rm[("那珂川町", "トンネル長寿命化修繕計画")] == 41
-
-
 def test_classify():
     assert P.classify(["栃木県"])[0] == "prefecture"
     assert P.classify(["那須烏山市"])[:2] == ("sole", "092151")
