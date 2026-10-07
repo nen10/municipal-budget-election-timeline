@@ -1,2 +1,9 @@
-politician_id,election_id,district,district_result,district_result_source_url,pr_revived,pr_revived_verification,pr_revived_source_url,note,retrieved_at
-yana_kazuo,shugiin_2026_smd_09_3,栃木県第3区,lost,https://www.pref.tochigi.lg.jp/senkyo/r08syugi/file/AS_KAIHYO_K_10_1.xls,1,unverified,,選挙区敗北は県選管の確定値で確認(渡辺 58483 票・やな 53975 票、惜敗率 92.291)。比例復活は依頼者提示の公知情報で一次出典(北関東ブロック選挙会の結果)は未確認,2026-10-08
+election_id,candidate_name,politician_id,pr_revived,pr_revived_verification,pr_revived_source_url,note,retrieved_at
+shugiin_20260208_smd_09_1,柏倉 ゆうじ,,1,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,時事ドットコム 開票結果(栃木選挙区)で「比」(比例代表で復活当選)の表示,2026-10-08
+shugiin_20260208_smd_09_1,小池 あつし,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08
+shugiin_20260208_smd_09_1,大森 紀明,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08
+shugiin_20260208_smd_09_2,福田 あきお,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08
+shugiin_20260208_smd_09_3,やな 和生,yana_kazuo,1,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,時事ドットコム 開票結果(栃木選挙区)で「比」の表示。選挙区は県選管確定値で渡辺 58483 票・やな 53975 票(惜敗率 92.291),2026-10-08
+shugiin_20260208_smd_09_3,いが 央,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08
+shugiin_20260208_smd_09_4,藤岡 たかお,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08
+shugiin_20260208_smd_09_5,寺田 たかふみ,,0,verified,https://www.jiji.com/jc/2026syu?l=senkyoku_09,重複立候補あり。同ページで当選・比例復活の表示なし,2026-10-08

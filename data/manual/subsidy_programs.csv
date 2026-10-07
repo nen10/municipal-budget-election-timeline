@@ -2,4 +2,4 @@ program_id,name,ministry,discretion_level,results_public,granularity,note,source
 soumu_tokko,特別交付税,総務省,,市は市別・町村は都道府県計のみ(報道発表),自治体 × 年度(12月分・3月分),裁量性の評価は未実施(空欄),https://www.soumu.go.jp/menu_news/s-news/,2026-10-08
 mlit_shasoukou,社会資本整備総合交付金,国土交通省,,当初配分を都道府県別PDFで公表,整備計画 × 計画策定主体 × 年度,共同計画は自治体別内訳なし。裁量性の評価は未実施(空欄),https://www.mlit.go.jp/report/press/kanbo05_hh_000304.html,2026-10-08
 mlit_bouan,防災・安全交付金,国土交通省,,当初配分を都道府県別PDFで公表,整備計画 × 計画策定主体 × 年度,共同計画は自治体別内訳なし。裁量性の評価は未実施(空欄),https://www.mlit.go.jp/report/press/kanbo05_hh_000304.html,2026-10-08
-mlit_road_maintenance,道路メンテナンス事業補助(箇所表),国土交通省 道路局,,当初配分の箇所表を都道府県別PDFで公表,事業主体 × 事業名 × 年度(百万円),裁量性の評価は未実施(空欄),https://www.mlit.go.jp/report/press/kanbo05_hh_000304.html,2026-10-08
+mlit_road,道路関係予算 当初配分(道路局 箇所表),国土交通省 道路局,,当初配分の箇所表を都道府県別PDFで公表,箇所 × 事業主体 × 年度(百万円),事業主体の記載がない行は自治体に帰属させない。裁量性の評価は未実施(空欄),https://www.mlit.go.jp/report/press/kanbo05_hh_000304.html,2026-10-08

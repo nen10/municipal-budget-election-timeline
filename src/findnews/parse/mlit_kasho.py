@@ -1,11 +1,11 @@
 """国土交通省「国土交通省関係予算の配分について」の都道府県別「事業実施箇所」PDF のパーサー。
 
-1 つの PDF(例: 栃木県分)から次の 2 種類を取り出す。
+1 つの PDF(例: 栃木県分)から次を取り出す。
   1. 「社会資本整備総合交付金の配分」表(社会資本整備総合交付金・防災・安全交付金)
      列: 計画名 | 計画策定主体 | 配分国費(千円) | 備考
      計画策定主体が複数の自治体の「共同計画」は自治体別の内訳が公表されていないため、
      attribution='joint' として自治体には按分しない(推定で割り振らない)。
-  2. 補助事業箇所表のうち「道路メンテナンス事業」行(事業主体 = 自治体、単位: 百万円)。
+道路局の箇所表(同じ PDF の先頭部分)は findnews.parse.mlit_road で扱う。
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from ..municipalities import lookup, normalize_name
 from .common import norm, to_number
 
 _SUBHEAD = re.compile(r"^(社会資本整備総合交付金|防災・安全交付金)\s*（単位")
-_ROADM = re.compile(r"^道路メンテナンス事業\s+(\S+)\s+(\S.*?)\s+([\d,]+)(?:\s|$)")
 
 PROGRAM_IDS = {"社会資本整備総合交付金": "mlit_shasoukou", "防災・安全交付金": "mlit_bouan"}
 
@@ -36,15 +35,6 @@ class GrantRow:
     page: int
     attribution: str = field(default="joint")   # sole / joint / prefecture
     municipality_code: str | None = None
-
-
-@dataclass
-class RoadMaintRow:
-    entity: str
-    municipality_code: str | None
-    item_name: str
-    amount_million_yen: float | None
-    page: int
 
 
 def classify(recipients: list[str], pref_name: str = "栃木県") -> tuple[str, str | None, list[str], list[str]]:
@@ -104,25 +94,12 @@ def parse_grant_page(page, page_no: int, pref_name: str = "栃木県") -> list[G
     return out
 
 
-def parse_road_maintenance_page(page, page_no: int) -> list[RoadMaintRow]:
-    out = []
-    for line in (page.extract_text() or "").splitlines():
-        m = _ROADM.match(line.strip())
-        if m:
-            entity = normalize_name(m.group(1))
-            out.append(RoadMaintRow(entity, lookup(entity), norm(m.group(2)), to_number(m.group(3)), page_no))
-    return out
-
-
 def parse_pdf(path: str | Path, pref_name: str = "栃木県") -> dict:
     grants: list[GrantRow] = []
-    roads: list[RoadMaintRow] = []
     totals: dict[str, float] = {}
     with pdfplumber.open(path) as pdf:
         for i, p in enumerate(pdf.pages, 1):
             text = p.extract_text() or ""
-            if "道路メンテナンス事業" in text:
-                roads.extend(parse_road_maintenance_page(p, i))
             if "計画策定主体" in text:
                 grants.extend(parse_grant_page(p, i, pref_name))
                 prog, tot = grant_totals(p)
@@ -131,4 +108,4 @@ def parse_pdf(path: str | Path, pref_name: str = "栃木県") -> dict:
     # 検算: 表の「合計」と行の合計の差(0 でなければ取りこぼしの疑い)
     check = {prog: tot - sum(g.amount_thousand_yen or 0 for g in grants if g.program == prog)
              for prog, tot in totals.items()}
-    return {"grants": grants, "road_maintenance": roads, "totals": totals, "total_check": check}
+    return {"grants": grants, "totals": totals, "total_check": check}

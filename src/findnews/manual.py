@@ -17,10 +17,12 @@ from . import config, db
 REQUIRED = {
     "politicians.csv": ["politician_id", "name", "source_url"],
     "positions.csv": ["politician_id", "title", "ministry", "start_date", "verification", "source_url"],
-    "election_outcomes.csv": ["politician_id", "election_id", "district_result", "pr_revived",
-                              "pr_revived_source_url", "district_result_source_url"],
-    "endorsements.csv": ["municipality_code", "candidate_name", "stance", "source_url"],
+    "election_outcomes.csv": ["election_id", "candidate_name", "pr_revived", "pr_revived_source_url"],
+    "endorsements.csv": ["municipality_code", "election_id", "mayor_name", "mayor_affiliation", "candidate_name",
+                         "candidate_party_nomination", "candidate_result", "endorsement_form", "source_url", "outlet",
+                         "evidence_date", "quote", "collection_status"],
     "subsidy_programs.csv": ["program_id", "name", "ministry", "discretion_level", "source_url"],
+    "statements.csv": ["speaker", "date", "venue", "quote", "outlet", "source_url"],
     "requests.csv": ["municipality_code", "fiscal_year", "project", "result", "source_url"],
 }
 
@@ -67,26 +69,36 @@ def load_all(conn: sqlite3.Connection, manual_dir: Path | None = None) -> dict:
     counts["positions"] = len(rows)
 
     # 比例復活: 出典 URL があるときだけ election_results に反映する(未確認は NULL のまま)
+    from .municipalities import normalize_name
     rows = read_csv(d / "election_outcomes.csv")
     applied = 0
+    conn.execute("UPDATE election_results SET pr_revived=NULL, pr_revived_source_url=NULL")
     for r in rows:
         if r.get("pr_revived") is not None and r.get("pr_revived_source_url"):
-            conn.execute("UPDATE election_results SET pr_revived=? WHERE election_id=? AND politician_id=?",
-                         (int(r["pr_revived"]), r["election_id"], r["politician_id"]))
-            applied += 1
+            for er in conn.execute("SELECT rowid, candidate_name, candidate_legal_name FROM election_results WHERE election_id=?",
+                                   (r["election_id"],)).fetchall():
+                if normalize_name(r["candidate_name"]) in (normalize_name(er[1]), normalize_name(er[2] or "")):
+                    conn.execute("UPDATE election_results SET pr_revived=?, pr_revived_source_url=? WHERE rowid=?",
+                                 (int(r["pr_revived"]), r["pr_revived_source_url"], er[0]))
+                    applied += 1
     counts["election_outcomes"] = len(rows)
     counts["election_outcomes_applied_to_results"] = applied
 
     conn.execute("DELETE FROM endorsements")
     rows = read_csv(d / "endorsements.csv")
     for r in rows:
+        status = r.get("collection_status") or "未収集"
+        if status != "未収集" and not (r.get("source_url") and r.get("quote")):
+            status = "未収集"  # 出典 URL と引用文のない行は収集済として扱わない
         conn.execute(
-            """INSERT INTO endorsements(endorser_name, endorser_role, municipality_code, candidate_name, politician_id,
-               election_id, stance, evidence_date, source_title, note, source_url, retrieved_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (r.get("endorser_name"), r.get("endorser_role"), r.get("municipality_code"), r.get("candidate_name"),
-             r.get("politician_id"), r.get("election_id"), r.get("stance"), r.get("evidence_date"),
-             r.get("source_title"), r.get("note"), r.get("source_url"), r.get("retrieved_at")))
+            """INSERT INTO endorsements(municipality_code, election_id, endorser_role, mayor_name, mayor_affiliation,
+               candidate_name, candidate_party_nomination, candidate_result, endorsement_form, source_url, outlet,
+               evidence_date, quote, collection_status, politician_id, note, retrieved_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (r.get("municipality_code"), r.get("election_id"), "首長", r.get("mayor_name"), r.get("mayor_affiliation"),
+             r.get("candidate_name"), r.get("candidate_party_nomination"), r.get("candidate_result"),
+             r.get("endorsement_form"), r.get("source_url"), r.get("outlet"), r.get("evidence_date"), r.get("quote"),
+             status, r.get("politician_id"), r.get("note"), r.get("retrieved_at")))
     counts["endorsements"] = len(rows)
 
     rows = read_csv(d / "subsidy_programs.csv")
@@ -112,6 +124,24 @@ def load_all(conn: sqlite3.Connection, manual_dir: Path | None = None) -> dict:
              r.get("source_url"), r.get("retrieved_at")))
     counts["requests"] = len(rows)
 
+    # 報道等で報じられた発言(原文の引用文。要約しない)
+    import hashlib
+    from .fetch.kokkai import match_keywords, target_municipalities
+    conn.execute("DELETE FROM statements WHERE source='press'")
+    rows = read_csv(d / "statements.csv") if (d / "statements.csv").exists() else []
+    for r in rows:
+        if not (r.get("source_url") and r.get("quote")):
+            continue
+        ext = hashlib.sha1(f"{r['source_url']}|{r['quote']}".encode()).hexdigest()[:16]
+        conn.execute(
+            """INSERT OR REPLACE INTO statements(source, external_id, speaker, speaker_group, speaker_position, politician_id,
+               date, meeting, body, matched_keywords, target_municipalities, source_url, retrieved_at)
+               VALUES ('press',?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (ext, r["speaker"], r.get("outlet"), r.get("published_date"), r.get("politician_id"), r.get("date"),
+             r.get("venue"), r["quote"], "|".join(match_keywords(r["quote"])), ",".join(target_municipalities(r["quote"])),
+             r["source_url"], r.get("retrieved_at")))
+    counts["statements_press"] = len(rows)
+
     data = yaml.safe_load((d / "cases.yaml").read_text(encoding="utf-8")) or {}
     for c in data.get("cases", []):
         conn.execute(
@@ -124,16 +154,20 @@ def load_all(conn: sqlite3.Connection, manual_dir: Path | None = None) -> dict:
     counts["cases"] = len(data.get("cases", []))
 
     # 既存の選挙結果・発言と議員 ID を再リンク
-    from .municipalities import normalize_name
     idx = {}
     for r in conn.execute("SELECT politician_id, name, name_variants FROM politicians"):
         for v in [r["name"]] + (r["name_variants"] or "").split("|"):
             if v.strip():
                 idx[normalize_name(v)] = r["politician_id"]
-    for table, col in (("election_results", "candidate_name"), ("statements", "speaker")):
-        for r in conn.execute(f"SELECT rowid, {col} FROM {table}").fetchall():
-            pid = idx.get(normalize_name(r[1] or ""))
-            if pid:
-                conn.execute(f"UPDATE {table} SET politician_id=? WHERE rowid=?", (pid, r[0]))
+    for r in conn.execute("SELECT rowid, candidate_name, candidate_legal_name FROM election_results").fetchall():
+        pid = idx.get(normalize_name(r[1] or "")) or idx.get(normalize_name(r[2] or ""))
+        if pid:
+            conn.execute("UPDATE election_results SET politician_id=? WHERE rowid=?", (pid, r[0]))
+    for r in conn.execute("SELECT rowid, speaker FROM statements").fetchall():
+        pid = idx.get(normalize_name(r[1] or ""))
+        if pid:
+            conn.execute("UPDATE statements SET politician_id=? WHERE rowid=?", (pid, r[0]))
     conn.commit()
+    from .fetch.tochigi_election import finalize_results
+    finalize_results(conn)
     return counts

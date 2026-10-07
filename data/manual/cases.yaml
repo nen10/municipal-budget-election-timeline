@@ -19,12 +19,18 @@ cases:
       - fact: 2026年2月衆院選で選挙区敗北
         source_url: https://www.pref.tochigi.lg.jp/senkyo/r08syugi/file/AS_KAIHYO_K_10_1.xls
         verification: verified
-      - fact: 比例復活
-        source_url: ""
-        verification: unverified
-      - fact: 2026年9月 農林水産大臣就任
-        source_url: ""
-        verification: unverified
+      - fact: 比例復活(北関東ブロック)
+        source_url: https://www.jiji.com/jc/2026syu?l=senkyoku_09
+        verification: verified
+      - fact: 2026-09-17 第2次高市改造内閣で農林水産大臣
+        source_url: https://www.kantei.go.jp/jp/105/meibo/index.html
+        verification: verified
+      - fact: 那須烏山市長・大田原市長・那珂川町長が渡辺真太朗氏を、那須塩原市長・那須町長が簗氏を支援(報道)
+        source_url: https://www.shimotsuke.co.jp/articles/-/1434360
+        verification: verified
+      - fact: 2026-05-24 の発言「那須烏山市と那珂川町の令和8年度の道路予算については、大幅にカットをしました」(報道された音声)
+        source_url: https://que.dailyshincho.jp/node/21198/
+        verification: verified
     verification: partially_verified
     source_url: ""
   - case_id: iwakuni_city_hall_2007

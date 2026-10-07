@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS positions (
 );
 
 CREATE TABLE IF NOT EXISTS elections (
-    election_id     TEXT PRIMARY KEY,          -- 例: shugiin_2026_tochigi_3
+    election_id     TEXT PRIMARY KEY,          -- 例: shugiin_20260208_smd_09_3(選挙単位のまとめは shugiin_20260208)
     kind            TEXT NOT NULL,             -- shugiin_smd / shugiin_pr など
     election_date   TEXT NOT NULL,
     district        TEXT,                      -- 例: 栃木県第3区
@@ -69,13 +69,23 @@ CREATE TABLE IF NOT EXISTS election_results (
     election_id     TEXT NOT NULL REFERENCES elections(election_id),
     municipality_code TEXT,                    -- 開票区から解決したコード(解決不能なら NULL)
     counting_unit   TEXT NOT NULL,             -- 原資料の開票区名(例: 宇都宮市第１)
-    candidate_name  TEXT NOT NULL,
+    candidate_name  TEXT NOT NULL,             -- 投票用紙・開票結果の表記(通称)
+    candidate_legal_name TEXT,                 -- 戸籍名(候補者届出状況公表票)
     politician_id   TEXT REFERENCES politicians(politician_id),
-    party           TEXT,
+    party           TEXT,                      -- 所属政党(届出政党・所属団体。無所属は「無所属」)
+    filing_type     TEXT,                      -- 政党届出 / 本人届出 / 推薦届出
+    nomination      TEXT,                      -- 公認・推薦の表示(例: 自由民主党公認 / 無所属)。他党推薦は出典がある場合のみ追記
+    recommending_parties TEXT,                 -- 他党の推薦(出典のあるもののみ。未確認は NULL)
+    incumbency      TEXT,                      -- 新 / 前 / 元
+    dual_candidacy  INTEGER,                   -- 比例重複立候補(1/0)
     votes           REAL,
+    vote_share      REAL,                      -- 自治体(選挙区内の部分)内の得票率 = 得票 ÷ 候補者得票の合計(有効投票)
+    rank_in_municipality INTEGER,              -- 自治体(選挙区内の部分)内の順位
     is_district_winner INTEGER,                -- 選挙区全体での当選(1/0)
-    pr_revived      INTEGER,                   -- 比例復活(1/0/NULL=未確認)
+    pr_revived      INTEGER,                   -- 比例復活(1/0/NULL=未確認)。重複立候補なしの落選者は 0
+    pr_revived_source_url TEXT,
     sekihai_rate    REAL,                      -- 惜敗率(%)
+    result_label    TEXT,                      -- 選挙区当選 / 落選・比例復活 / 落選 / 落選(比例復活未確認)
     source_url      TEXT,
     retrieved_at    TEXT,
     PRIMARY KEY (election_id, counting_unit, candidate_name)
@@ -83,17 +93,22 @@ CREATE TABLE IF NOT EXISTS election_results (
 
 CREATE TABLE IF NOT EXISTS endorsements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    endorser_name   TEXT,
-    endorser_role   TEXT,                      -- 首長 / 地方議員 / 団体
     municipality_code TEXT,
-    candidate_name  TEXT,
-    politician_id   TEXT,
-    election_id     TEXT,
-    stance          TEXT,                      -- support / oppose / neutral / 空欄=未確認
-    evidence_date   TEXT,
-    source_title    TEXT,
-    note            TEXT,
+    election_id     TEXT,                      -- 選挙 ID(shugiin_20260208 など、選挙単位)
+    endorser_role   TEXT,                      -- 首長 / 地方議員 / 団体
+    mayor_name      TEXT,                      -- 当該選挙時点の首長(出典の記載どおり)
+    mayor_affiliation TEXT,                    -- 首長の党派(所属政党。無所属なら首長選での推薦政党)
+    candidate_name  TEXT,                      -- 支持した候補(複数なら複数行)
+    candidate_party_nomination TEXT,           -- 支持候補の政党と公認・推薦の別(例: 自民公認)
+    candidate_result TEXT,                     -- 選挙区当選 / 落選・比例復活 / 落選
+    endorsement_form TEXT,                     -- 出陣式出席 / 推薦状 / 応援演説 / 報道での明言 / 後援会役員 / その他
     source_url      TEXT,
+    outlet          TEXT,                      -- 媒体名
+    evidence_date   TEXT,                      -- 出典の日付
+    quote           TEXT,                      -- 引用文(原文)
+    collection_status TEXT,                    -- 収集済 / 中立・非表明(出典あり) / 未収集
+    politician_id   TEXT,
+    note            TEXT,
     retrieved_at    TEXT
 );
 
