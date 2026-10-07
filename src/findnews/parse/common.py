@@ -42,3 +42,13 @@ def era_year_to_ad(text: str) -> int | None:
         return None
     n = 1 if m.group(2) == "元" else int(m.group(2))
     return _JP_ERA[m.group(1)] + n
+
+
+def era_fiscal_year_to_ad(text: str) -> int | None:
+    """「…年度」の形のみを対象にした和暦→西暦年度(日付の「令和8年3月」を誤認しない)。"""
+    t = norm(text)
+    m = re.search(r"(令和|平成)(元|\d+)年度", t)
+    if not m:
+        return None
+    n = 1 if m.group(2) == "元" else int(m.group(2))
+    return _JP_ERA[m.group(1)] + n
