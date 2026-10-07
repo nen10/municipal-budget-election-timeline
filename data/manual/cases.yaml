@@ -1,0 +1,69 @@
+# 検証用の既知事例(設計書 第6節)。
+# 概要は設計書の記述をそのまま転記したもので、一次出典は未確認(source_url 空欄)。
+# 出典を確認したら source_url と verification を更新すること。推測で事実を追記しないこと。
+# label: under_review(検証中) / reference(参照事例) / negative(陰性事例)
+cases:
+  - case_id: yana_2026_nasukarasuyama_nakagawa
+    name: 簗和生氏・那須烏山市・那珂川町
+    period: "2026"
+    pattern: 事後的減額(疑い)
+    label: under_review
+    summary: 本設計書の契機。検証中
+    politicians: [yana_kazuo]
+    municipalities: ["092151", "094111"]
+    known_facts:
+      # 依頼者が公知として提示した範囲のみ。出典 URL は未記入。
+      - fact: 選挙区は栃木3区
+        source_url: https://www.pref.tochigi.lg.jp/senkyo/r08syugi/file/AS_KAIHYO_K_10_1.xls
+        verification: verified
+      - fact: 2026年2月衆院選で選挙区敗北
+        source_url: https://www.pref.tochigi.lg.jp/senkyo/r08syugi/file/AS_KAIHYO_K_10_1.xls
+        verification: verified
+      - fact: 比例復活
+        source_url: ""
+        verification: unverified
+      - fact: 2026年9月 農林水産大臣就任
+        source_url: ""
+        verification: unverified
+    verification: partially_verified
+    source_url: ""
+  - case_id: iwakuni_city_hall_2007
+    name: 岩国市・市庁舎建設補助金
+    period: "2007 前後"
+    pattern: 反転
+    label: reference
+    summary: 艦載機移転に反対した市長時代に補助金凍結、市長交代後に再開
+    politicians: []
+    municipalities: []
+    verification: unverified
+    source_url: ""
+  - case_id: nago_beigun_saihen_2010
+    name: 名護市・米軍再編交付金
+    period: "2010 以降"
+    pattern: 条件付き補助金
+    label: reference
+    summary: 辺野古反対の市長当選後に不交付
+    politicians: []
+    municipalities: []
+    verification: unverified
+    source_url: ""
+  - case_id: okinawa_shinko_2015
+    name: 沖縄振興予算
+    period: "2015 以降"
+    pattern: 事後的減額(議論あり)
+    label: reference
+    summary: 翁長知事の基地反対姿勢と前後して減額が継続
+    politicians: []
+    municipalities: []
+    verification: unverified
+    source_url: ""
+  - case_id: dpj_kashozuke_2010
+    name: 民主党政権の箇所付け事前通知
+    period: "2010"
+    pattern: 配分ルートの政治化
+    label: reference
+    summary: 配分情報が党ルートで流れた傍証
+    politicians: []
+    municipalities: []
+    verification: unverified
+    source_url: ""

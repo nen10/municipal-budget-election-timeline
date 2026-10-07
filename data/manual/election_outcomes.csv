@@ -1,0 +1,2 @@
+politician_id,election_id,district,district_result,district_result_source_url,pr_revived,pr_revived_verification,pr_revived_source_url,note,retrieved_at
+yana_kazuo,shugiin_2026_smd_09_3,栃木県第3区,lost,https://www.pref.tochigi.lg.jp/senkyo/r08syugi/file/AS_KAIHYO_K_10_1.xls,1,unverified,,選挙区敗北は県選管の確定値で確認(渡辺 58483 票・やな 53975 票、惜敗率 92.291)。比例復活は依頼者提示の公知情報で一次出典(北関東ブロック選挙会の結果)は未確認,2026-10-08
