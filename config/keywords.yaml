@@ -1,0 +1,18 @@
+# 発言キーワード(DESIGN.md 5.3)と由来。
+# origin_case_id が空のものは設計書 5.3 の一般的な例示。値があるものは特定の事例・報道から追加したもので、
+# その事例(cases.yaml の politicians / municipalities)への一致は独立した検証にならない(DESIGN.md 12 節 8 項)。
+keywords:
+  - {keyword: 予算を減らした,   origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 予算をカット,     origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 協力しない自治体, origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: お灸,             origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 冷や飯,           origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 要望は聞かない,   origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 応援しなかった,   origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 選挙で世話になった, origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 予算を取ってきた, origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - {keyword: 箇所付け,         origin: DESIGN.md 5.3, origin_case_id: "", origin_source_url: ""}
+  - keyword: 大幅にカット
+    origin: 簗和生氏の発言報道(新潮QUE 2026-09-30)から追加
+    origin_case_id: yana_2026_nasukarasuyama_nakagawa
+    origin_source_url: https://que.dailyshincho.jp/node/21198/

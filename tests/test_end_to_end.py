@@ -51,6 +51,8 @@ def test_matrix_and_verify_outputs(conn, fixtures, tmp_path):
     verify.run(conn, out)
     v = out.read_text(encoding="utf-8")
     assert "那須烏山市(092151)" in v and "未取得" in v
+    assert "1年前倒し" not in v and "2022–2024" in v     # 指標 3 の選挙前は 2022–2024 年度
+    assert r["pre_years_ind3"] == "[2022, 2023, 2024]" and r["post_year_ind3"] == "2025"
     assert "z=" not in v and "ピア" not in v        # 他自治体との比較はしない
     for text in (md, v):
         for b in BANNED:
@@ -64,6 +66,11 @@ def test_detect_offline(conn, fixtures, tmp_path):
     md = (tmp_path / "out" / "report.md").read_text(encoding="utf-8")
     assert "要検証シグナル" in md and res["n_signals"] > 0
     assert "大幅にカット" in md        # 報道された発言は原文のまま
+    assert "由来事例のため独立検証にならない" in md
+    import csv as _csv
+    with open(tmp_path / "out" / "signals.csv", encoding="utf-8-sig") as f:
+        sig = [r for r in _csv.DictReader(f) if r["municipality_code"] == "092151" and r["politician_id"] == "yana_kazuo"]
+    assert sig and sig[0]["c_statement_match"] == "0.0" and sig[0]["n_statements_not_independent"] == "1"
     for b in BANNED:
         assert b not in md
 

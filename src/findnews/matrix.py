@@ -93,7 +93,8 @@ def windows(conn, election_date: str) -> dict:
            AND decision_date > ?""", (election_date,)))
     post3 = tk[0] if tk else None
     pre = [post45 - 3, post45 - 2, post45 - 1] if post45 else []
-    return {"pre_years": pre, "post_year": post45, "post_year_tokko": post3}
+    pre3 = [post3 - 3, post3 - 2, post3 - 1] if post3 else []
+    return {"pre_years": pre, "post_year": post45, "pre_years_tokko": pre3, "post_year_tokko": post3}
 
 
 def _derive(result: str, prefix: str) -> str:
@@ -258,13 +259,13 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
         raise SystemExit(f"選挙 {group} の結果が DB にない(findnews fetch tochigi-election を先に実行)")
     edate = next(iter(info.values()))["date"]
     w = windows(conn, edate)
-    yrs = [y for y in w["pre_years"] + [w["post_year"], w["post_year_tokko"]] if y]
+    yrs = [y for y in w["pre_years"] + w["pre_years_tokko"] + [w["post_year"], w["post_year_tokko"]] if y]
     period = (min(yrs + [cfg["verification"]["period"][0]]), max(yrs + [cfg["verification"]["period"][1]]))
     codes = sorted({p.code for p in parts})
     obs = V.build(conn, codes, period)
     pp = {}
     for c in codes:
-        pp[(c, "3b")] = V.pre_post(obs[(c, "3b")], w["pre_years"], w["post_year_tokko"], th) if w["post_year_tokko"] else None
+        pp[(c, "3b")] = V.pre_post(obs[(c, "3b")], w["pre_years_tokko"], w["post_year_tokko"], th) if w["post_year_tokko"] else None
         for k in ("4", "5"):
             pp[(c, k)] = V.pre_post(obs[(c, k)], w["pre_years"], w["post_year"], th) if w["post_year"] else None
     dirs = {k: {c: (pp[(c, k)]["direction"] if pp[(c, k)] else V.MISSING) for c in codes} for k, _ in B_KEYS}
@@ -281,8 +282,9 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
          "- A2: 県選管の開票区別得票(確定値)から機械的に算出。得票率 = 候補の得票 ÷ 当該自治体(選挙区内の部分)の候補者得票合計。",
          "- 候補の政党表示は県選管の候補者届出状況公表票による(「◯◯公認」= 政党届出、「無所属」= 本人届出)。他党の推薦は未収集。",
          "- 比例復活は data/manual/election_outcomes.csv に出典つきで登録したもの、重複立候補なしの落選者は「落選」。",
-         f"- 軸 B: 各自治体を自分の過去と比べた方向(閾値 ±{th * 100:.1f}%)。選挙前 = {w['pre_years']} 年度平均、"
-         f"選挙後 = 指標 4・5 は {w['post_year']} 年度、指標 3 は {w['post_year_tokko']} 年度 3 月分。他自治体を基準にした正規化はしていない。",
+         f"- 軸 B: 各自治体を自分の過去と比べた方向(閾値 ±{th * 100:.1f}%)。指標 4・5 は {w['pre_years']} 年度平均 vs "
+         f"{w['post_year']} 年度、指標 3 は {w['pre_years_tokko']} 年度の 3 月分平均 vs {w['post_year_tokko']} 年度 3 月分。"
+         "他自治体を基準にした正規化はしていない。",
          "- 「減少の割合」は行内の件数の比(記述統計)。有意性や因果を示すものではない。", ""]
 
     L += ["## A3 選挙区の当選者・比例復活者と選挙後の役職", ""]
@@ -348,7 +350,7 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
                 "A3_revived_positions"]
         for key, _ in B_KEYS:
             head += [f"ind{key}_pre_avg", f"ind{key}_post", f"ind{key}_diff", f"ind{key}_rate", f"ind{key}_direction"]
-        head += ["pre_years", "post_year_ind45", "post_year_ind3", "threshold"]
+        head += ["pre_years_ind45", "post_year_ind45", "pre_years_ind3", "post_year_ind3", "threshold"]
         wr.writerow(head)
         for p in parts:
             di = info[p.district]
@@ -372,6 +374,6 @@ def run(conn: sqlite3.Connection, group: str, pref_code: str = "09", out_dir: st
                 x = pp[(p.code, key)]
                 row += ([x["pre"], x["post"], x["diff"], None if x["rate"] is None else round(x["rate"], 4), x["direction"]]
                         if x else ["", "", "", "", V.MISSING])
-            row += [json.dumps(w["pre_years"]), w["post_year"], w["post_year_tokko"], th]
+            row += [json.dumps(w["pre_years"]), w["post_year"], json.dumps(w["pre_years_tokko"]), w["post_year_tokko"], th]
             wr.writerow(["" if v is None else v for v in row])
     return {"md": str(md_path), "csv": str(csv_path), "rows": len(parts), "a1_uncollected": n_unc, "windows": w}

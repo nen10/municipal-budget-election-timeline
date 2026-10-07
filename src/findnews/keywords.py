@@ -1,17 +1,28 @@
-"""発言検出のキーワード(設計書 5.3)。"""
+"""発言検出のキーワード(設計書 5.3)とその由来。定義は config/keywords.yaml。
 
-# 報復・誘導を示唆しうる表現と、配分への影響力を示す手柄話の両方を含む(後者も「配分を左右できる」証拠として保持)
-STATEMENT_KEYWORDS = [
-    "予算を減らした",
-    "予算をカット",
-    "協力しない自治体",
-    "お灸",
-    "冷や飯",
-    "要望は聞かない",
-    "応援しなかった",
-    "選挙で世話になった",
-    "予算を取ってきた",
-    "箇所付け",
-    # 以下は契機事例(簗氏の発言報道)の文言から追加したもの。この事例自体の検出は独立した検証にならない点に注意
-    "大幅にカット",
-]
+由来事例(origin_case_id)のあるキーワードは、その事例に関わる議員・自治体の発言への一致を
+「由来事例のため独立検証にならない」として扱い、スコアの発言一致には数えない(DESIGN.md 12 節 8 項)。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+from . import config
+
+
+def load(path: str | Path | None = None) -> list[dict]:
+    p = Path(path or config.ROOT / "config" / "keywords.yaml")
+    data = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    out = []
+    for k in data.get("keywords", []):
+        out.append({"keyword": str(k["keyword"]), "origin": k.get("origin") or "",
+                    "origin_case_id": k.get("origin_case_id") or "", "origin_source_url": k.get("origin_source_url") or ""})
+    return out
+
+
+KEYWORDS = load()
+STATEMENT_KEYWORDS = [k["keyword"] for k in KEYWORDS]
+ORIGIN = {k["keyword"]: k for k in KEYWORDS}

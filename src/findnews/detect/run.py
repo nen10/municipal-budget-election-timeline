@@ -35,11 +35,11 @@ def run(conn: sqlite3.Connection, pref_code: str = "09", out_dir: Path | None = 
     codes = sorted(TOCHIGI)
     prepost, dd = {}, {}
     if w:
-        yrs = [y for y in w["pre_years"] + [w["post_year"], w["post_year_tokko"]] if y]
+        yrs = [y for y in w["pre_years"] + w["pre_years_tokko"] + [w["post_year"], w["post_year_tokko"]] if y]
         obs = verify.build(conn, codes, (min(yrs), max(yrs)))
         for c in codes:
             if w["post_year_tokko"]:
-                prepost[(c, "3b")] = verify.pre_post(obs[(c, "3b")], w["pre_years"], w["post_year_tokko"], th)
+                prepost[(c, "3b")] = verify.pre_post(obs[(c, "3b")], w["pre_years_tokko"], w["post_year_tokko"], th)
             for k in ("4", "5"):
                 if w["post_year"]:
                     prepost[(c, k)] = verify.pre_post(obs[(c, k)], w["pre_years"], w["post_year"], th)

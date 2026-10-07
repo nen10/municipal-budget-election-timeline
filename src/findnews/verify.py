@@ -161,19 +161,15 @@ def max_decline(series: dict[int, Obs]) -> dict | None:
             "decline": dec, "rate": (dec / vals[ymax]) if vals[ymax] else None}
 
 
-def pre_post(series: dict[int, Obs], pre_years, post_year, threshold, alt_pre_years=None) -> dict:
+def pre_post(series: dict[int, Obs], pre_years, post_year, threshold) -> dict:
     pre_vals = [series[y].value for y in pre_years if y in series]
     post = series.get(post_year)
     res = {"pre_years": list(pre_years), "post_year": post_year, "pre": None, "post": None,
-           "diff": None, "rate": None, "direction": MISSING, "alt_pre": None}
+           "diff": None, "rate": None, "direction": MISSING}
     if len(pre_vals) == len(pre_years) and all(v is not None for v in pre_vals):
         res["pre"] = sum(pre_vals) / len(pre_vals)
     if post is not None and post.value is not None:
         res["post"] = post.value
-    if alt_pre_years:
-        av = [series[y].value for y in alt_pre_years if y in series]
-        if len(av) == len(alt_pre_years) and all(v is not None for v in av):
-            res["alt_pre"] = sum(av) / len(av)
     if res["pre"] is not None and res["post"] is not None:
         res["diff"] = res["post"] - res["pre"]
         res["rate"] = res["diff"] / res["pre"] if res["pre"] != 0 else None
@@ -237,8 +233,7 @@ def compute(conn: sqlite3.Connection, pref_code: str = "09", cfg: dict | None = 
     pre = v["pre_years"]
     for c in codes:
         for key in ("3a", "3b", "3c"):
-            alt = [y - 1 for y in pre]
-            prepost[(c, key)] = pre_post(obs[(c, key)], pre, v["post_year_tokko"], th, alt_pre_years=alt)
+            prepost[(c, key)] = pre_post(obs[(c, key)], v["pre_years_tokko"], v["post_year_tokko"], th)
         for key in ("4", "5"):
             prepost[(c, key)] = pre_post(obs[(c, key)], pre, v["post_year"], th)
     item_rows = []
@@ -294,8 +289,9 @@ def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県")
     L = [f"# {title_pref} 全市町の補助金・交付金の時系列記録(DESIGN.md 第10節)", "",
          f"- 対象: {len(res.codes)} 市町 / 対象年度: {res.period[0]}–{res.period[1]}(西暦の会計年度)",
          f"- 増減方向の閾値: ±{th * 100:.1f}%(設定ファイル: `{res.settings['_path']}`)",
-         f"- 選挙前: {v['pre_years'][0]}–{v['pre_years'][-1]} 年度の平均 / 選挙後: 指標 4・5 は {v['post_year']} 年度、"
-         f"指標 3 は {v['post_year_tokko']} 年度 3 月分(2026-02-08 投票の衆院選の後に決定)",
+         f"- 選挙前後: 指標 4・5 は {v['pre_years'][0]}–{v['pre_years'][-1]} 年度平均 → {v['post_year']} 年度当初配分、"
+         f"指標 3 は {v['pre_years_tokko'][0]}–{v['pre_years_tokko'][-1]} 年度の各年度分の平均 → {v['post_year_tokko']} 年度分"
+         f"(3 月分は 2026-03 交付で、2026-02-08 投票の衆院選の後に決定)",
          "- 各市町は自分自身の過去の値とだけ比べている。他市町を基準にした正規化・順位・z スコアは算出していない。",
          "- 金額の単位は千円。未取得は推定せず「未取得」、前年値が 0 または未取得の変化率は「未定義」。", ""]
 
@@ -343,24 +339,24 @@ def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県")
 
     # 選挙前後
     L += ["## 4. 選挙前後の変化(指標 3〜5)", "",
-          f"選挙前 = {v['pre_years'][0]}–{v['pre_years'][-1]} 年度平均、選挙後 = 指標 4・5 は {v['post_year']} 年度、"
-          f"指標 3 は {v['post_year_tokko']} 年度。",
-          f"注: 仕様どおり指標 3 の選挙前平均には {v['post_year_tokko']} 年度が含まれ、選挙後の値({v['post_year_tokko']} 年度 3 月分)と重なる。"
-          f"参考として {v['pre_years'][0] - 1}–{v['pre_years'][-1] - 1} 年度平均も併記する(方向の判定には使わない)。", ""]
+          f"指標 4・5: 選挙前 = {v['pre_years'][0]}–{v['pre_years'][-1]} 年度平均、選挙後 = {v['post_year']} 年度。",
+          f"指標 3: 選挙前 = {v['pre_years_tokko'][0]}–{v['pre_years_tokko'][-1]} 年度の各年度分の平均、"
+          f"選挙後 = {v['post_year_tokko']} 年度分(3a は 12 月分で選挙前の 2025-12 に決定、3c は 12 月分と 3 月分の合計で、"
+          "いずれも参考。軸 B に使うのは 3b の 3 月分)。", ""]
     rows = []
     for c in res.codes:
         for key in ("3a", "3b", "3c", "4", "5"):
             p = res.prepost[(c, key)]
-            alt = _n(p["alt_pre"]) if key.startswith("3") else "—"
             cnt = ""
             if IND[key].has_count:
                 s = res.obs[(c, key)]
                 pc = [s[y].count for y in v["pre_years"] if s[y].count is not None]
                 cnt = (f"{sum(pc) / len(pc):.1f} → {s[v['post_year']].count}"
                        if len(pc) == len(v["pre_years"]) and s[v["post_year"]].count is not None else MISSING)
-            rows.append([TOCHIGI[c], f"{key} {IND[key].label}", _n(p["pre"]), alt, _n(p["post"]),
+            rows.append([TOCHIGI[c], f"{key} {IND[key].label}", f"{p['pre_years'][0]}–{p['pre_years'][-1]}", _n(p["pre"]),
+                         p["post_year"], _n(p["post"]),
                          _n(p["diff"]) if p["diff"] is not None else UNDEF, _pct(p["rate"]), p["direction"], cnt or "—"])
-    L += [_t(["市町", "指標", "選挙前平均", "(参考)1年前倒しの平均", "選挙後", "差額", "変化率", "方向", "件数(前平均→後)"], rows), ""]
+    L += [_t(["市町", "指標", "選挙前の年度", "選挙前平均", "選挙後の年度", "選挙後", "差額", "変化率", "方向", "件数(前平均→後)"], rows), ""]
     # 方向の集計(件数のみ)
     L += ["方向別の市町数(各市町を自分の過去と比べた結果を数えたもの):", ""]
     rows = []

@@ -4,7 +4,8 @@ score = Σ weight_i × contribution_i(各寄与は 0〜1)
   own_decline      (0.6): 選挙後の値が当該自治体自身の選挙前平均より減った割合のうち最大のもの(指標 3・4・5)。
                           contribution = min(1, max(0, -(選挙後 − 選挙前平均) / 選挙前平均))
                           他自治体との比較は使わない。
-  statement_match  (0.3): 当該議員の発言、または当該自治体名を含む発言でキーワードに一致した件数 n → min(1, n/3)
+  statement_match  (0.3): 当該議員の発言、または当該自治体名を含む発言でキーワードに一致した件数 n → min(1, n/3)。
+                          キーワードの由来事例への一致(config/keywords.yaml の origin_case_id)は数えない
   authority        (0.1): 減少が最大の指標の所管省庁(指標 3 = 総務省、4・5 = 国土交通省)と、
                           その配分の決定日時点で在任中の議員の役職(positions.csv)の所管省庁が一致すれば 1
   reversal         (0.0): 反転パターン(第2フェーズ。現状は常に 0)
@@ -21,7 +22,7 @@ from datetime import date
 
 import pandas as pd
 
-from .statements import by_politician, mentioning
+from .statements import by_politician, independent, mentioning
 
 WEIGHTS = {"own_decline": 0.6, "statement_match": 0.3, "authority": 0.1, "reversal": 0.0}
 INDICATOR_MINISTRY = {"3b": "総務省", "4": "国土交通省", "5": "国土交通省"}
@@ -73,7 +74,9 @@ def compute_signals(prepost: dict, decision_dates: dict, panel: pd.DataFrame, st
         wr = avail[worst]["rate"] if worst else None
         when = decision_dates.get(worst) if worst else None
         auth, auth_note = authority_contribution(positions, p.politician_id, INDICATOR_MINISTRY.get(worst), when)
-        st = pd.concat([by_politician(statements, p.politician_id), mentioning(statements, p.code)]).drop_duplicates("id")
+        st_all = pd.concat([by_politician(statements, p.politician_id), mentioning(statements, p.code)]).drop_duplicates("id")
+        st = independent(st_all)
+        excluded = st_all[~st_all.id.isin(st.id)]
         contrib = {"own_decline": decline_contribution(wr), "statement_match": statement_contribution(len(st)),
                    "authority": auth, "reversal": 0.0}
         ungated = sum(WEIGHTS[k] * v for k, v in contrib.items())
@@ -85,6 +88,9 @@ def compute_signals(prepost: dict, decision_dates: dict, panel: pd.DataFrame, st
             "authority_note": auth_note, "reversal_note": "未実装(第2フェーズ)",
             "statements": [{"date": r.date, "speaker": r.speaker, "venue": r.meeting, "url": r.source_url}
                            for r in st.itertuples()][:10],
+            "statements_excluded_not_independent": [
+                {"date": r.date, "speaker": r.speaker, "url": r.source_url, "note": r.origin_note}
+                for r in excluded.itertuples()],
             "election_source_url": p.source_url,
         }
         rows.append({
@@ -95,6 +101,7 @@ def compute_signals(prepost: dict, decision_dates: dict, panel: pd.DataFrame, st
             "top_share": round(float(p.top_share), 4),
             "score": round(ungated if p.opposed_locally else 0.0, 4), "score_ungated": round(ungated, 4),
             **{f"c_{k}": round(v, 4) for k, v in contrib.items()}, "n_statements": len(st),
+            "n_statements_not_independent": len(excluded),
             "contributions": json.dumps({k: round(WEIGHTS[k] * v, 4) for k, v in contrib.items()}, ensure_ascii=False),
             "evidence": json.dumps(evidence, ensure_ascii=False, default=str),
             "source_url": p.source_url,

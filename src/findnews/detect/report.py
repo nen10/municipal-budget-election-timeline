@@ -28,7 +28,7 @@ def _t(headers, rows):
 def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, st, th) -> str:
     L = [f"# 要検証シグナル レポート(都道府県コード {pref_code}、選挙 {group})", "", f"run_id: `{run_id}`", "", DISCLAIMER, ""]
     if w:
-        L += [f"選挙前 = {w['pre_years']} 年度平均、選挙後 = 指標 4・5 は {w['post_year']} 年度、指標 3 は "
+        L += [f"指標 4・5: {w['pre_years']} 年度平均 vs {w['post_year']} 年度。指標 3: {w['pre_years_tokko']} 年度の 3 月分平均 vs "
               f"{w['post_year_tokko']} 年度 3 月分。方向の閾値 ±{th * 100:.1f}%。", ""]
     L += ["## 1. 寄与内訳つきスコア", "",
           "重み: " + "、".join(f"{k} {v}" for k, v in WEIGHTS.items()) +
@@ -43,7 +43,9 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
             rows.append([TOCHIGI.get(r.municipality_code), f"{r.candidate_name}({r.nomination}、{r.result_label})",
                          f"{r.candidate_share:.1%}({r.candidate_rank}位)", f"{r.top_candidate}({r.top_nomination}) {r.top_share:.1%}",
                          f"{r.score:.3f}", f"{r.score_ungated:.3f}",
-                         f"自身の減少 {r.c_own_decline:.2f} / 発言 {r.c_statement_match:.2f} / 権限 {r.c_authority:.2f} / 反転 {r.c_reversal:.2f}",
+                         f"自身の減少 {r.c_own_decline:.2f} / 発言 {r.c_statement_match:.2f}"
+                         + (f"(由来事例のため除外 {r.n_statements_not_independent} 件)" if r.n_statements_not_independent else "")
+                         + f" / 権限 {r.c_authority:.2f} / 反転 {r.c_reversal:.2f}",
                          ind])
         L += [_t(["自治体", "議員(政党、結果)", "議員の得票率(順位)", "自治体内 1 位", "score", "score_ungated", "寄与(0〜1)",
                   "指標(選挙前平均→選挙後)"], rows), ""]
@@ -54,14 +56,20 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
 
     L += ["## 2. 発言キーワード一致(原文)", ""]
     if len(st):
+        from ..keywords import ORIGIN
         kc = st.matched_keywords.str.split("|").explode().value_counts()
-        L += [_t(["キーワード", "一致した発言数"], [[k, v] for k, v in kc.items()]), ""]
+        L += [_t(["キーワード", "一致した発言数", "由来", "由来事例", "由来の出典"],
+                 [[k, v, ORIGIN.get(k, {}).get("origin", ""), ORIGIN.get(k, {}).get("origin_case_id", "") or "—",
+                   ORIGIN.get(k, {}).get("origin_source_url", "") or "—"] for k, v in kc.items()]), "",
+              "由来事例のあるキーワードが、その事例の議員・自治体の発言に一致した場合は「由来事例のため独立検証にならない」と注記し、"
+              "スコアの発言一致に数えない(DESIGN.md 12 節 8 項)。", ""]
         press = st[st.source == "press"]
         if len(press):
             L += ["### 報道された発言(data/manual/statements.csv、引用文は原文)", ""]
             for r in press.itertuples():
                 L.append(f"- 発言者: {r.speaker} / 日付: {r.date} / 場: {r.meeting} / 媒体: {r.speaker_group} / 出典: {r.source_url}")
-                L.append(f"  - 引用:「{r.body}」 一致キーワード: {r.matched_keywords}")
+                L.append(f"  - 引用:「{r.body}」 一致キーワード: {r.matched_keywords}"
+                         + (f" ※{r.origin_note}" if r.origin_note else ""))
             L.append("")
         pids = [x[0] for x in conn.execute("SELECT politician_id FROM politicians")]
         L += ["### 登録議員の発言で一致したもの", ""]
@@ -70,7 +78,8 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
             if len(sp):
                 L.append(f"**{pid}: {len(sp)} 件**")
                 for r in sp.itertuples():
-                    L.append(f"- {r.date} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}")
+                    L.append(f"- {r.date} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}"
+                             + (f" ※{r.origin_note}" if r.origin_note else ""))
                 L.append("")
         codes = sorted({c for c in (sig.municipality_code if len(sig) else [])})
         L += ["### 選挙区内の自治体名を含み一致したもの", ""]
@@ -79,7 +88,8 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
             if len(sm):
                 L.append(f"**{TOCHIGI[c]}: {len(sm)} 件**")
                 for r in sm.itertuples():
-                    L.append(f"- {r.date} {r.speaker} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}")
+                    L.append(f"- {r.date} {r.speaker} {r.meeting}「{excerpt(r.body, r.matched_keywords)}」 {r.source_url}"
+                             + (f" ※{r.origin_note}" if r.origin_note else ""))
                 L.append("")
         kok = st[st.source == "kokkai"]
         L += [f"### 国会会議録で一致した発言(全 {len(kok)} 件、発言者・会議・日付・URL)", ""]
@@ -89,5 +99,5 @@ def render(conn: sqlite3.Connection, run_id, pref_code, group, w, prepost, sig, 
     L += ["## 3. 注意", "",
           "- 各自治体の値は verify(DESIGN.md 第10節)と同じ計算。全年度の表は data/processed/verification_tochigi.md。",
           "- 町の特別交付税(指標 3)は報道発表に個別額がなく未取得。指標 4 は単独策定主体の計画のみ、指標 5 は事業主体が当該市町の箇所のみ。",
-          "- キーワード「大幅にカット」は契機事例の報道から追加したため、この事例の一致は独立した検証にならない。", ""]
+          "- キーワードの由来は config/keywords.yaml。由来事例への一致は上記のとおり注記し、スコアに数えていない。", ""]
     return "\n".join(L) + "\n"

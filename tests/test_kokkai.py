@@ -17,3 +17,10 @@ def test_parse_fixture(fixtures):
     assert len(parsed) == 2
     assert all(p["matched"] == ["予算を取ってきた"] for p in parsed)
     assert all(p["url"].startswith("https://kokkai.ndl.go.jp/") for p in parsed)
+
+
+def test_keyword_origins():
+    from findnews.keywords import ORIGIN, STATEMENT_KEYWORDS
+    assert "箇所付け" in STATEMENT_KEYWORDS and ORIGIN["箇所付け"]["origin_case_id"] == ""
+    assert ORIGIN["大幅にカット"]["origin_case_id"] == "yana_2026_nasukarasuyama_nakagawa"
+    assert ORIGIN["大幅にカット"]["origin_source_url"].startswith("https://")
