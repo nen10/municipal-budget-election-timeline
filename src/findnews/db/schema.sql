@@ -287,3 +287,70 @@ CREATE TABLE IF NOT EXISTS events (
     generated_by    TEXT,                      -- 自動生成したモジュール名(手作業は NULL)
     retrieved_at    TEXT
 );
+
+-- 地方財政状況調査 市町村分(e-Stat CSV、A1)。全市区町村 × 年度 × 表 × 行 × 列。保存する行・列は estat_chizai.KEEP で絞る
+CREATE TABLE IF NOT EXISTS estat_values (
+    fiscal_year     INTEGER NOT NULL,
+    code            TEXT NOT NULL,             -- 団体コード 6 桁(合併前後は別コードのまま。名寄せしない)
+    table_no        TEXT NOT NULL,             -- 04 / 07〜13 / 21 / 70
+    row_no          TEXT NOT NULL,
+    item_code       TEXT NOT NULL,
+    value           REAL,
+    PRIMARY KEY (fiscal_year, code, table_no, row_no, item_code)
+);
+CREATE TABLE IF NOT EXISTS estat_labels (
+    fiscal_year     INTEGER NOT NULL,
+    table_no        TEXT NOT NULL,
+    row_no          TEXT NOT NULL,
+    item_code       TEXT NOT NULL,
+    row_name        TEXT,
+    item_name       TEXT,
+    source_url      TEXT,
+    retrieved_at    TEXT,
+    PRIMARY KEY (fiscal_year, table_no, row_no, item_code)
+);
+CREATE TABLE IF NOT EXISTS estat_entities (
+    fiscal_year     INTEGER NOT NULL,
+    code            TEXT NOT NULL,
+    pref_name       TEXT,
+    name            TEXT,
+    kubun           TEXT,                      -- 団体区分(資料の値)
+    PRIMARY KEY (fiscal_year, code)
+);
+
+-- 全体(全国・都道府県計)の系列(DESIGN.md 16.2)
+CREATE TABLE IF NOT EXISTS totals (
+    indicator_id    TEXT NOT NULL,
+    level           TEXT NOT NULL,             -- national / prefecture
+    pref_code       TEXT NOT NULL,             -- 全国は '00'
+    series          TEXT NOT NULL,             -- 系列名(定義を明記: 例「全国 市町村分 特別交付税 3月交付額(交付決定)」)
+    period_start    TEXT NOT NULL,
+    period_end      TEXT,
+    decided_date    TEXT,
+    value           REAL,
+    unit            TEXT,
+    note            TEXT,
+    source_url      TEXT,
+    retrieved_at    TEXT,
+    PRIMARY KEY (indicator_id, level, pref_code, series, period_start)
+);
+
+-- 国交省 交付決定(B1)。1 行 1 交付決定(変更減額は負の値のまま)
+CREATE TABLE IF NOT EXISTS grant_decisions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    fiscal_year     INTEGER,
+    half            TEXT,                      -- 上半期 / 下半期 / 年度
+    bureau          TEXT,                      -- 局(ファイルの区分)
+    sheet           TEXT,
+    project_name    TEXT,                      -- 事業名
+    recipient_name  TEXT,                      -- 補助金交付先名
+    corporate_number TEXT,                     -- 法人番号
+    municipality_code TEXT,                    -- 法人番号から導出(地方公共団体のみ)
+    amount_yen      REAL,
+    account         TEXT,                      -- 支出元会計区分
+    subsidy_name    TEXT,                      -- 支出科目(補助金名)
+    decided_date    TEXT,
+    source_url      TEXT,
+    retrieved_at    TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_gd_muni ON grant_decisions(municipality_code, fiscal_year);
