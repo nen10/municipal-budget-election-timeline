@@ -7,3 +7,7 @@ data/raw/*
 !data/raw/.gitkeep
 data/processed/*
 !data/processed/.gitkeep
+# 検証・マトリックスの出力は記録として版管理する
+!data/processed/verification_tochigi.md
+!data/processed/matrix_tochigi_*.md
+!data/processed/matrix_tochigi_*.csv

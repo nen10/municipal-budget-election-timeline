@@ -338,7 +338,7 @@ def render(conn: sqlite3.Connection, res: Result, title_pref: str = "栃木県")
                 rows.append([TOCHIGI[c], f"{ind.key} {ind.label}", MISSING, "", "", "", "", ""])
             else:
                 rows.append([TOCHIGI[c], f"{ind.key} {ind.label}", _n(m["max"]), m["max_year"], _n(m["latest"]),
-                             m["latest_year"], _n(m["decline"]), _pct(-m["rate"]) if m["rate"] is not None else UNDEF])
+                             m["latest_year"], _n(m["decline"]), _pct(-m["rate"] if m["rate"] else 0.0) if m["rate"] is not None else UNDEF])
     L += [_t(["市町", "指標", "最大値", "最大の年度", "最新値", "最新年度", "最大値からの減少額", "最大値からの変化率"], rows), ""]
 
     # 選挙前後
@@ -424,6 +424,24 @@ def notes(conn, res: Result) -> list[str]:
     for c in res.codes:
         rows.append([TOCHIGI[c]] + [_n(vals.get((c, y))) for y in yrs])
     L += [_t(["市町"] + [str(y) for y in yrs], rows), ""]
+    # 事業主体の記載がない道路局の行(指標 5 に含めていない)
+    rows = []
+    for r in conn.execute("""SELECT fiscal_year, item_name, recipient_codes, amount_thousand_yen, raw_ref FROM subsidy_allocations
+                             WHERE program_id='mlit_road' AND attribution='unknown' ORDER BY fiscal_year""").fetchall():
+        cs = [c for c in (r[2] or "").split(",") if c in res.codes]
+        if cs:
+            route = next((x.split("=", 1)[1] for x in (r[4] or "").split(" ") if x.startswith("route=")), "")
+            rows.append(["、".join(TOCHIGI[c] for c in cs), r[0], r[1].replace("|", " / "), route, _n(r[3])])
+    L += ["### 道路局箇所表のうち事業主体の記載がなく指標 5 に含めていない行(所在地に当該市町を含むもの、千円)", "",
+          _t(["所在市町", "年度", "工種 / 事業名(箇所)", "路線名", "事業費"], rows) if rows else "該当なし", ""]
+    # 報道された数値(本システムの指標とは集計範囲が異なる)
+    L += ["### 報道された国交省の数値(本システムの指標とは集計範囲が異なる)", "",
+          "- 時事ドットコム 2026-10-06「対立候補支援の２市町、道路予算が最大５４％減　簗氏「カット」発言、圧力なし―国交省」"
+          " https://www.jiji.com/jc/article?k=2026100600835&g=eco : 今年度の道路関連予算が「那須烏山市が前年度比２６．２％減、"
+          "那珂川町が同５４．１％減だった」。",
+          "- 本記録の指標 5(道路局箇所表のうち事業主体が当該市町の箇所、当初配分)の 2025→2026 年度の前年比は上の年度表のとおりで、"
+          "報道の数値とは一致しない。共同計画(社総交・防安交)の市町別内訳など、公表 PDF にない配分が報道の集計に含まれている可能性があるが、"
+          "資料からは確認できない。", ""]
     # 合併
     card_codes = {}
     for r in conn.execute("SELECT fiscal_year, COUNT(DISTINCT code) FROM municipality_fiscal WHERE source='soumu_card' GROUP BY 1"):
