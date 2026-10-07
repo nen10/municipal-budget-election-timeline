@@ -11,3 +11,6 @@ data/processed/*
 !data/processed/verification_tochigi.md
 !data/processed/matrix_tochigi_*.md
 !data/processed/matrix_tochigi_*.csv
+!data/processed/timeline_*.csv
+!data/processed/timeline_*/
+!data/processed/events_*.md

@@ -12,41 +12,64 @@
 ```sh
 python3.13 -m venv .venv            # Python 3.11 以上
 .venv/bin/pip install -e '.[dev]'
-.venv/bin/findnews db init          # data/processed/findnews.sqlite を作成(第4節の全テーブル + fetch_log)
+.venv/bin/findnews db init          # data/processed/findnews.sqlite を作成(第4節の全テーブル + observations, events, fetch_log)
 .venv/bin/findnews manual load      # data/manual/ の手作業データを投入
 ```
 
-スキーマを変更した場合は `data/processed/findnews.sqlite` を削除して作り直す(`fetch ... --offline` で data/raw から再構築できる)。
+スキーマを変更した場合は `data/processed/findnews.sqlite` を削除して作り直す(`fetch --offline` で data/raw から再構築できる)。
 
-## コマンド
+## コマンド(DESIGN.md 14.3)
 
 | コマンド | 内容 |
 |---|---|
-| `findnews fetch soumu-card` | 総務省 市町村決算カード(栃木県、直近 5 年度) |
-| `findnews fetch soumu-tokko` | 総務省 特別交付税 報道発表(12 月分・3 月分、2020–2025 年度) |
-| `findnews fetch mlit-grants` | 国交省 社会資本整備総合交付金・防災・安全交付金 当初配分(2021–2026 年度) |
-| `findnews fetch mlit-road` | 国交省 道路局 当初配分箇所表(同じ PDF の道路局セクション) |
-| `findnews fetch soumu-jumin` | 総務省 住民基本台帳人口(最新年、参考人口列用) |
-| `findnews fetch tochigi-election` | 栃木県選管 衆院選 2026-02-08 / 2024-10-27 / 2021-10-31 の開票区別得票と候補者届出状況公表票 |
-| `findnews fetch kokkai` | 国会会議録検索システム API(DESIGN.md 5.3 のキーワード) |
-| `findnews fetch all` | 上記をすべて |
-| `findnews verify tochigi` | 第10節: 全 25 市町の時系列記録 → `data/processed/verification_tochigi.md` |
-| `findnews matrix --pref 09 --election shugiin_20260208` | 第11節: 分離マトリックス → `data/processed/matrix_tochigi_<選挙ID>.md/.csv` |
-| `findnews detect run --pref 09 [--election ID]` | 自治体自身の減少・発言一致・寄与内訳つきスコア → `data/processed/reports/<run_id>/` |
+| `findnews fetch --pref 09 --years 2020-2026 [--source <id> ...] [--offline] [--force]` | 取得 → data/raw 保存 → パース → DB と `observations` に投入。`--source` 省略時は全部 |
+| `findnews sources list [--pref <2桁>]` | 登録済みアダプタと、その都道府県での対応状況(未対応はその旨を表示)、指標 ID の一覧 |
+| `findnews events generate --pref 09` | 衆院選投票・役職就任・内閣発足・予算配分公表・特別交付税交付決定のイベントを自動登録 |
+| `findnews events import [data/manual/events.csv]` | 報道由来などの手作業イベントを登録(出典 URL のない行は登録しない) |
+| `findnews timeline --pref 09 [--muni <6桁>] [--indicator <id>]` | 第13節: 差分時系列とイベントの対応 → `timeline_09.csv`、`timeline_09/<自治体>.md`、`events_09.md` |
+| `findnews verify --pref 09`(別名 `verify tochigi`) | 第10節: 全市町の時系列記録 → `verification_tochigi.md` |
+| `findnews matrix --pref 09 --election shugiin_20260208` | 第11節: 分離マトリックス → `matrix_tochigi_<選挙ID>.md/.csv` |
+| `findnews detect run --pref 09 [--election ID]` | 自治体自身の差分・発言一致・寄与内訳つきスコア → `reports/<run_id>/` |
 | `findnews status` | テーブル件数と fetch_log の最新状態 |
 
-すべての `fetch` は「URL 一覧 → data/raw/<source>/ に保存(manifest.jsonl に URL・取得日時・SHA-256)→ パース → DB 投入」の順で、
-`--offline` を付けると保存済みファイルだけをパースする。外部アクセスは同一ホストに 1 秒以上の間隔(国会会議録 API は約 3 秒)、
-User-Agent は `findnews-research/0.1 (...)`(`FINDNEWS_USER_AGENT` で変更可)。
+ソース ID: `soumu_jumin`(全国の市区町村マスタと人口。他県では最初に実行)、`soumu_card`、`soumu_tokko`、`mlit_grants`、
+`mlit_road`、`election`(都道府県の選管アダプタ)、`kokkai`。
 
-増減方向の閾値(既定 ±5%)、対象年度、選挙前後の年度は `config/settings.yaml` で変更できる。
-選挙前後の定義(2026-02-08 の衆院選): 指標 4・5 は 2023–2025 年度平均 vs 2026 年度当初配分、
-指標 3(特別交付税 3 月分)は 2022–2024 年度の 3 月分平均 vs 2025 年度 3 月分(2026-03-17 決定)。
-`matrix` で他の選挙を指定した場合も、投票日から同じ規則で年度を決める。
+外部アクセスは同一ホストに 1 秒以上の間隔(国会会議録 API は約 3 秒)、User-Agent は `findnews-research/0.1 (...)`
+(`FINDNEWS_USER_AGENT` で変更可)。取得物は data/raw/<source>/ に保存し、manifest.jsonl に URL・取得日時・SHA-256 を残す。
 
-発言キーワードとその由来は `config/keywords.yaml`(keyword, origin, origin_case_id, origin_source_url)。
-特定の事例から追加したキーワード(現状「大幅にカット」)がその事例の議員・自治体の発言に一致した場合、
-検出レポートでは「由来事例のため独立検証にならない」と注記し、スコアの発言一致に数えない。
+### 差分時系列(DESIGN.md 第13節)
+
+平均との比較はしない。各自治体 × 指標について、観測時点ごとの値と直前の観測時点との差分(Δ、変化率、方向)を並べる。
+
+| 指標 ID | 指標 | 観測時点 | decided_date |
+|---|---|---|---|
+| `card_kokko` / `card_pref` | 1 国庫支出金 / 2 県支出金(決算) | 年度 | 年度末(3/31)。公表日は未収集 |
+| `tokko_dec` / `tokko_march` | 3 特別交付税 12 月分 / 3 月分 | 年度ごとの 12 月分・3 月分(別系列) | 交付決定日(報道発表日) |
+| `mlit_sole_grants` | 4 社総交・防安交(単独策定主体) | 当初配分の回 | 当初配分の報道発表日を代用(`decided_date_is_proxy=1`) |
+| `mlit_road` | 5 道路局箇所表(事業主体=市町) | 当初配分の回 | 同上 |
+
+差分の対応期間は「直前の観測時点の decided_date の翌日 〜 当該観測時点の decided_date」で、日付が重なるイベントを対応付ける
+(月単位・期間のイベントは重なれば対応)。対応は日付の機械的な重なりで、関係を示すものではない。
+マトリックスの軸 B と detect のスコアは「投票日の直後に来る最初の観測時点の直前時点比」を使う。
+
+増減方向の閾値(既定 ±5%)と対象年度は `config/settings.yaml`。発言キーワードと由来は `config/keywords.yaml`
+(由来事例のあるキーワードがその事例の議員・自治体の発言に一致した場合は「由来事例のため独立検証にならない」と注記し、スコアに数えない)。
+
+## 新しい都道府県を追加する手順(DESIGN.md 14.4)
+
+1. `findnews fetch --pref <code> --source soumu_jumin` で全国の市区町村マスタを入れる(他県の自治体コード・名称はここから取る)。
+2. `findnews fetch --pref <code> --years 2021-2026` で全国対応ソース(決算カード、特別交付税、国交省配分・道路局箇所表)を取得する。
+   `findnews sources list --pref <code>` で対応状況を確認する。
+3. その県の選管アダプタを `src/findnews/fetch/elections/pref<code>_<name>.py` に実装し(`ElectionSource` プロトコル:
+   `pref_code`、`list_elections()`、`fetch()`、`parse()`、`run()`)、`src/findnews/sources/registry.py` の `_election_sources()` に登録する。
+   選管の公表形式は県ごとに違うため、既存の栃木県アダプタ(Excel + 候補者届出状況公表票 PDF)はそのまま使えない。
+4. `data/manual/endorsements.csv`、`events.csv`、`positions.csv`、`election_outcomes.csv` にその県の行を出典つきで追加する。
+5. `findnews events generate --pref <code>`、`findnews events import`、`findnews timeline --pref <code>`、
+   `findnews matrix --pref <code> --election <ID>`、`findnews verify --pref <code>` を実行する。
+6. 出力の冒頭の未対応・未収集・未取得の件数を確認する。未対応のソースはエラーにならず「未対応」と出る。
+
+出力の CSV(`timeline_<pref>.csv`、`matrix_*.csv`)はすべて `pref_code` と `municipality_code` を持つ長形式で、県をまたいで縦に結合できる。
 
 ## 取得・パースの状況(2026-10-08 時点)
 
@@ -73,6 +96,7 @@ User-Agent は `findnews-research/0.1 (...)`(`FINDNEWS_USER_AGENT` で変更可)
 | `positions.csv` | 政府・党の役職 | 官邸名簿で確認した 3 件(簗和生 農林水産大臣 2026-09-17、茂木敏充 外務大臣 2026-02-18・2026-09-17)。党役職は未収集 |
 | `statements.csv` | 報道された発言(原文、発言者・場・日付・出典) | 1 件(新潮QUE 2026-09-30) |
 | `subsidy_programs.csv` | 補助事業マスタ | 裁量性の評価は未実施(空欄) |
+| `events.csv` | 政局イベント(DESIGN.md 13.3) | 10 件: 簗氏から国交副大臣・官房長への問い合わせ(時事通信 2026-10-06、月まで、那須烏山市・那珂川町)、簗氏の発言(新潮QUE 2026-09-30、2026-05-24。場は出典どおり「自民党大田原支部総会後の懇親会」で、設計書第1節の「県連会合」とは記載が異なる)、首長の支持表明 6 件(日付は出典になく選挙期間として記録) |
 | `cases.yaml` | 第6節の既知事例 5 件 | 簗氏の件のみ一部出典確認済。他 4 件は設計書の記述の転記で出典未確認 |
 | `requests.csv` | 要望と採択 | 雛形のみ |
 
@@ -81,9 +105,11 @@ User-Agent は `findnews-research/0.1 (...)`(`FINDNEWS_USER_AGENT` で変更可)
 
 ## 出力
 
-- `data/processed/verification_tochigi.md`: 全 25 市町 × 指標 1〜5 の年度表(金額・前年差額・変化率・方向・参考人口)、最大値からの減少、選挙前後、事業別の継続/新規/消滅、出典と取得日、注記
-- `data/processed/matrix_tochigi_<選挙ID>.md` / `.csv`: A1(首長の支持)・A2(自治体内得票)・A3(議員の役職)× 指標 3〜5 の方向
-- `data/processed/reports/<run_id>/report.md`, `signals.csv`: 寄与内訳つきスコア(自身の減少 0.6・発言 0.3・権限 0.1・反転 0.0)
+- `data/processed/timeline_09.csv` / `timeline_09/<自治体コード>.md` / `events_09.md`: 差分時系列と政局イベント(第13節)
+
+- `data/processed/verification_tochigi.md`: 全 25 市町 × 指標 1〜5 の年度表(金額・前年差額・変化率・方向・参考人口)、最大値からの減少、選挙後最初の差分(3 選挙)、事業別の継続/新規/消滅、出典と取得日、注記
+- `data/processed/matrix_tochigi_<選挙ID>.md` / `.csv`: A1(首長の支持)・A2(自治体内得票)・A3(議員の役職)× 指標 3〜5 の投票日後最初の差分の方向
+- `data/processed/reports/<run_id>/report.md`, `signals.csv`: 寄与内訳つきスコア(投票日後最初の差分の減少 0.6・発言 0.3・権限 0.1・反転 0.0)
 
 ## テスト
 
@@ -100,10 +126,13 @@ User-Agent は `findnews-research/0.1 (...)`(`FINDNEWS_USER_AGENT` で変更可)
 ```
 src/findnews/
   db/        schema.sql、接続・初期化
-  fetch/     ソースごとの取得(soumu_card, soumu_tokko, mlit_grants, mlit_road, soumu_jumin, tochigi_election, kokkai)
+  sources/   アダプタのプロトコル(IndicatorSource / ElectionSource)、指標アダプタ、レジストリ
+  fetch/     ソースごとの取得(soumu_card, soumu_tokko, mlit_grants, mlit_road, soumu_jumin, kokkai, tochigi_election)
+  fetch/elections/  都道府県選管アダプタ(pref09_tochigi.py)
   parse/     PDF/Excel のパーサー(ネットワーク非依存)
   detect/    パネル、スコア、レポート
-  verify.py  第10節、matrix.py 第11節、manual.py 手作業データ、cli.py
+  pipeline.py fetch 本体、timeline.py 第13節、events.py イベント、verify.py 第10節、matrix.py 第11節、
+  prefs.py 都道府県表、municipalities.py 市区町村マスタ、manual.py 手作業データ、cli.py
 config/settings.yaml
 data/raw/ (取得物、版管理外)  data/manual/  data/processed/
 tests/
